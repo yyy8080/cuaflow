@@ -1,7 +1,193 @@
 import { useEffect, useState } from 'react';
-import { MODEL_ROLES, api, type L2Policy, type ModelRole, type ModelSpec, type Settings } from '../api';
+import {
+  MODEL_ROLES,
+  api,
+  type CuaEvent,
+  type L2Policy,
+  type ModelRole,
+  type ModelSpec,
+  type Settings,
+  type UpdateStatus,
+} from '../api';
+import { Badge } from '../components/StatusBadge';
 import { Card, ErrorBox, Loading } from '../components/common';
-import { ROLE_LABEL } from '../lib/format';
+import { ROLE_LABEL, fmtTime } from '../lib/format';
+import { useEventSocket } from '../ws';
+
+const INSTALL_MODE_LABEL: Record<string, string> = {
+  windows_installer: 'Windows 安装包版（支持静默自更新重启）',
+  windows_portable: 'Windows 绿色便携版（支持自动解压更新重启）',
+  git_source: 'Git 源码工作区（支持拉取最新代码）',
+  pip_package: 'Python 包环境（支持 pip 在线升级）',
+  frozen_binary: '独立可执行文件版',
+};
+
+function UpdateCard() {
+  const [u, setU] = useState<UpdateStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api.updateStatus(false).then(setU).catch(() => {});
+  }, []);
+
+  useEventSocket({
+    onEvent: (ev: CuaEvent) => {
+      if (ev.type === 'update_status' && ev.data) {
+        setU(ev.data as UpdateStatus);
+      }
+    },
+  });
+
+  const handleCheck = async () => {
+    setBusy(true);
+    try {
+      const res = await api.checkUpdate();
+      setU(res);
+    } catch (e) {
+      setU((prev) =>
+        prev
+          ? { ...prev, status: 'error', error: (e as Error).message }
+          : null,
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleApply = async () => {
+    setBusy(true);
+    try {
+      const res = await api.applyUpdate();
+      setU(res);
+    } catch (e) {
+      setU((prev) =>
+        prev
+          ? { ...prev, status: 'error', error: (e as Error).message }
+          : null,
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const inProgress =
+    u?.status === 'checking' ||
+    u?.status === 'downloading' ||
+    u?.status === 'verifying' ||
+    u?.status === 'installing' ||
+    u?.status === 'restarting';
+
+  return (
+    <div id="update">
+      <Card
+        title="版本检测与在线更新"
+        actions={
+          <div className="row-actions">
+            <button
+              id="btn-check-update"
+              type="button"
+              className="btn btn-sm"
+              disabled={busy || inProgress}
+              onClick={() => void handleCheck()}
+            >
+              {u?.status === 'checking' ? '检测中…' : '🔍 检查新版本'}
+            </button>
+            {u?.release_url && (
+              <a className="btn btn-sm" href={u.release_url} target="_blank" rel="noreferrer">
+                GitHub 发布页 ↗
+              </a>
+            )}
+          </div>
+        }
+      >
+        {!u ? (
+          <div className="muted small">正在读取本地版本信息…</div>
+        ) : (
+          <div className="update-box">
+            <div className="update-summary-row">
+              <div className="update-ver-group">
+                <span>
+                  当前版本：<strong className="mono">v{u.current_version}</strong>
+                </span>
+                {u.checked_at && (
+                  <span>
+                    远端最新：<strong className="mono">v{u.latest_version}</strong>
+                  </span>
+                )}
+                <Badge
+                  tone={
+                    u.status === 'error'
+                      ? 'danger'
+                      : u.has_update
+                        ? 'warning'
+                        : u.status === 'up_to_date' || u.status === 'done'
+                          ? 'success'
+                          : 'info'
+                  }
+                >
+                  {u.has_update
+                    ? `发现新版本 v${u.latest_version}`
+                    : u.status === 'up_to_date'
+                      ? '已是最新版本'
+                      : u.status === 'done'
+                        ? '更新已完成'
+                        : u.status === 'restarting'
+                          ? '正在自动重启'
+                          : inProgress
+                            ? '正在处理'
+                            : '待检测'}
+                </Badge>
+              </div>
+              <span className="muted small">
+                运行模式：{INSTALL_MODE_LABEL[u.install_mode] || u.install_mode}
+                {u.checked_at ? ` · 上次检查 ${fmtTime(u.checked_at)}` : ''}
+              </span>
+            </div>
+
+            {u.message && <div className="update-msg">{u.message}</div>}
+            {u.error && <div className="worker-error">{u.error}</div>}
+
+            {(u.status === 'downloading' || u.status === 'verifying' || u.status === 'installing' || u.status === 'restarting') && (
+              <div className="update-progress-wrap">
+                <div className="update-progress-track">
+                  <div
+                    className="update-progress-fill"
+                    style={{ width: `${Math.min(100, Math.max(2, u.progress_pct ?? 5))}%` }}
+                  />
+                </div>
+                <span className="mono small">{u.progress_pct ?? 0}%</span>
+              </div>
+            )}
+
+            {u.has_update && (
+              <div className="update-release-panel">
+                {u.release_notes && <pre className="update-notes">{u.release_notes}</pre>}
+                <div className="update-actions-row">
+                  {u.can_self_update ? (
+                    <button
+                      id="btn-apply-update"
+                      type="button"
+                      className="btn btn-primary"
+                      disabled={busy || inProgress}
+                      onClick={() => void handleApply()}
+                    >
+                      🚀 一键下载并更新至 v{u.latest_version}
+                      {u.asset_size ? ` (${(u.asset_size / (1024 * 1024)).toFixed(1)} MB)` : ''}
+                    </button>
+                  ) : (
+                    <a className="btn btn-primary" href={u.release_url} target="_blank" rel="noreferrer">
+                      前往下载 v{u.latest_version} 安装包
+                    </a>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
 
 const L2_LABEL: Record<L2Policy, string> = {
   always: '每步都检查（always）',
@@ -125,8 +311,10 @@ export function SettingsPage() {
     <div className="page">
       <div className="page-head">
         <h1>设置</h1>
-        <p className="subtitle">模型、监督策略与安全规则。可直接粘贴 API Key（脱敏保存在本机），也可留空从环境变量读取。</p>
+        <p className="subtitle">版本更新、模型配置、多智能体并行池与监督安全规则。可直接粘贴 API Key（脱敏保存在本机）。</p>
       </div>
+
+      <UpdateCard />
 
       <Card title="默认模型">
         <ModelFields value={s.models.default} onChange={(m) => upd((d) => ({ ...d, models: { ...d.models, default: m } }))} />

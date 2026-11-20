@@ -22,6 +22,7 @@ from cuaflow.library.store import Store, now_iso
 from cuaflow.llm import LLM, LLMProvider, UsageMeter, usage_scope
 from cuaflow.platform.paths import data_dir
 from cuaflow.platform.shell import LocalShell
+from cuaflow.updater import UpdateManager
 
 
 class Services:
@@ -42,6 +43,7 @@ class Services:
         self.author = Author(self.deps)
         self.operator = DirectOperator(self.deps)
         self.planner = MissionPlanner(self.deps, self.supervisor, self.author)
+        self.updater = UpdateManager(self.bus, updates_dir=self.root.parent / "updates")
         resumable = self._recover_stale()
         self.orchestrator = Orchestrator(self, start_worker=start_worker)
         self.pool = SubagentPool(self, start_workers=start_worker)

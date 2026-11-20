@@ -166,3 +166,117 @@ def test_desktop_launcher_headless_lifecycle_and_single_instance_reuse(monkeypat
     for srv in created_servers:
         srv.should_exit = True
     t.join(timeout=5.0)
+
+
+def test_semver_comparison_and_update_manager_windows_installer_flow(monkeypatch, tmp_path: Path):
+    """验证版本号语义比对、GitHub Releases 检测、SHA-256 完整性校验以及 Windows 安装包静默自替换脚本生成。"""
+    import hashlib
+    import httpx
+    from cuaflow.updater import UpdateManager, is_newer_version
+
+    assert is_newer_version("v0.2.2", "0.2.1") is True
+    assert is_newer_version("0.10.0", "0.2.9") is True
+    assert is_newer_version("v0.2.2", "0.2.2") is False
+    assert is_newer_version("0.2.2-rc1", "0.2.2") is False
+
+    installer_bytes = b"MZ-fake-inno-setup-payload-0.3.0"
+    good_sha = hashlib.sha256(installer_bytes).hexdigest()
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path.endswith("/releases/latest"):
+            return httpx.Response(
+                200,
+                json={
+                    "tag_name": "v0.3.0",
+                    "html_url": "https://github.com/yyy8080/cuaflow/releases/tag/v0.3.0",
+                    "body": "### 更新说明\n- 新增版本自动检测与一键更新",
+                    "published_at": "2026-11-20T08:00:00Z",
+                    "assets": [
+                        {
+                            "name": "cuaflow-setup-0.3.0-win64.exe",
+                            "size": len(installer_bytes),
+                            "browser_download_url": "https://downloads.example.com/cuaflow-setup-0.3.0-win64.exe",
+                        },
+                        {
+                            "name": "SHA256SUMS.txt",
+                            "size": 90,
+                            "browser_download_url": "https://downloads.example.com/SHA256SUMS.txt",
+                        },
+                    ],
+                },
+            )
+        if req.url.path.endswith("cuaflow-setup-0.3.0-win64.exe"):
+            return httpx.Response(200, content=installer_bytes, headers={"Content-Length": str(len(installer_bytes))})
+        if req.url.path.endswith("SHA256SUMS.txt"):
+            return httpx.Response(200, text=f"{good_sha}  cuaflow-setup-0.3.0-win64.exe\n")
+        return httpx.Response(404)
+
+    detached_calls: list[list[str]] = []
+    shutdown_called = threading.Event()
+
+    fake_install_dir = tmp_path / "installed_app"
+    fake_install_dir.mkdir(parents=True)
+    fake_exe = fake_install_dir / "cuaflow-desktop.exe"
+    fake_exe.write_text("exe", encoding="utf-8")
+    (fake_install_dir / "unins000.exe").write_text("unins", encoding="utf-8")
+
+    import sys
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(fake_exe))
+    monkeypatch.setattr("cuaflow.updater.spawn_detached", lambda cmd, **kw: detached_calls.append(list(cmd)))
+
+    mgr = UpdateManager(
+        current_version="0.2.2",
+        updates_dir=tmp_path / "updates",
+        shutdown_callback=shutdown_called.set,
+        http_transport=httpx.MockTransport(handler),
+    )
+    assert mgr.status_dict()["install_mode"] == "windows_installer"
+
+    checked = mgr.check_for_updates(force=True)
+    assert checked["has_update"] is True
+    assert checked["latest_version"] == "0.3.0"
+    assert checked["asset_name"] == "cuaflow-setup-0.3.0-win64.exe"
+    assert checked["can_self_update"] is True
+
+    applied = mgr.start_apply_update(async_run=False)
+    assert applied["status"] == "restarting"
+    assert (tmp_path / "updates" / "cuaflow-setup-0.3.0-win64.exe").read_bytes() == installer_bytes
+    ps1 = (tmp_path / "updates" / "apply_update.ps1").read_text(encoding="utf-8-sig")
+    assert "/VERYSILENT" in ps1
+    assert str(fake_exe) in ps1
+    assert len(detached_calls) == 1
+    assert detached_calls[0][0] == "powershell.exe"
+    assert shutdown_called.wait(timeout=3.0)
+
+
+def test_update_api_endpoints(tmp_path: Path):
+    """验证服务端 /api/update/status 与 /api/update/check 接口鉴权与返回结构。"""
+    import httpx
+    from cuaflow.updater import UpdateManager
+
+    svc = Services(root=tmp_path / "lib", settings_file=tmp_path / "settings.json", start_worker=False)
+    svc.updater = UpdateManager(
+        svc.bus,
+        current_version="0.2.2",
+        updates_dir=tmp_path / "updates",
+        http_transport=httpx.MockTransport(
+            lambda req: httpx.Response(200, json={"tag_name": "v0.2.2", "assets": [], "body": "up to date"})
+        ),
+    )
+    try:
+        client = TestClient(create_app(svc, token="utok"))
+        headers = {"Authorization": "Bearer utok"}
+
+        r0 = client.get("/api/update/status", headers=headers)
+        assert r0.status_code == 200
+        assert r0.json()["current_version"] == "0.2.2"
+
+        r1 = client.post("/api/update/check", headers=headers)
+        assert r1.status_code == 200
+        assert r1.json()["status"] == "up_to_date"
+        assert r1.json()["has_update"] is False
+    finally:
+        svc.close()

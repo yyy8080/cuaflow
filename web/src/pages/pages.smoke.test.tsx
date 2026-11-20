@@ -197,6 +197,24 @@ function route(url: string): unknown {
       },
     ];
   }
+  if (p === '/api/update/status') {
+    return {
+      current_version: '0.2.2',
+      latest_version: '0.3.0',
+      tag_name: 'v0.3.0',
+      has_update: true,
+      status: 'available',
+      install_mode: 'windows_installer',
+      can_self_update: true,
+      repo: 'yyy8080/cuaflow',
+      release_url: 'https://github.com/yyy8080/cuaflow/releases/tag/v0.3.0',
+      release_notes: '新增一键在线更新能力',
+      checked_at: '2024-01-03T00:00:05Z',
+      asset_name: 'cuaflow-setup-0.3.0-win64.exe',
+      asset_size: 98 * 1024 * 1024,
+      message: '发现新版本 v0.3.0',
+    };
+  }
   if (p === '/api/tickets') return u.searchParams.get('status') === 'open' ? [ticket] : [];
   if (p === '/api/settings') return settings;
   return null;

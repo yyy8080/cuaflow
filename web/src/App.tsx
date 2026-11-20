@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { NavLink, Route, Routes } from 'react-router-dom';
-import { api, getToken, onUnauthorized } from './api';
+import { NavLink, Route, Routes, useNavigate } from 'react-router-dom';
+import { api, getToken, onUnauthorized, type UpdateStatus } from './api';
 import { useAsync } from './lib/hooks';
 import { ChatStudioPage } from './pages/ChatStudioPage';
 import { TasksPage } from './pages/TasksPage';
@@ -47,6 +47,45 @@ function ActiveWorkerBadge() {
   const { data } = useAsync(() => api.listWorkers({ active_only: true }), [], 4000);
   const n = data?.length ?? 0;
   return n > 0 ? <span className="nav-count nav-count-info">{n}</span> : null;
+}
+
+function VersionFooterPill() {
+  const navigate = useNavigate();
+  const [info, setInfo] = useState<UpdateStatus | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    // 启动后静默读取当前版本号并触发一次后台轻量检查
+    api
+      .updateStatus(true)
+      .then((res) => {
+        if (!cancelled) setInfo(res);
+        // 3 秒后再拉取一次后台检查完成后的缓存结果
+        setTimeout(() => {
+          if (!cancelled) {
+            api.updateStatus(false).then((r2) => !cancelled && setInfo(r2)).catch(() => {});
+          }
+        }, 3000);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!info) return null;
+
+  return (
+    <button
+      type="button"
+      className={`version-pill ${info.has_update ? 'has-update' : ''}`}
+      title={info.has_update ? `发现新版本 v${info.latest_version}，点击前往更新` : `当前版本 v${info.current_version}，点击检查更新`}
+      onClick={() => navigate('/settings#update')}
+    >
+      <span className="mono">v{info.current_version}</span>
+      {info.has_update && <span className="version-new-dot">↑ v{info.latest_version}</span>}
+    </button>
+  );
 }
 
 const THEME_KEY = 'cuaflow_theme';
@@ -104,8 +143,9 @@ export function App() {
             <span className="nav-ico">⚙️</span>设置
           </NavLink>
         </nav>
-        <div className="sidebar-foot">
+        <div className="sidebar-foot sidebar-foot-row">
           <ThemeToggle />
+          <VersionFooterPill />
         </div>
       </aside>
       <main className="main">

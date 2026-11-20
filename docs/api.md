@@ -138,6 +138,9 @@ type Ticket = {
 |---|---|---|---|
 | GET | `/api/health` | – | `{ok: true, version, platform}`（无需鉴权） |
 | GET | `/api/stats` | – | `GlobalStats`（Token 消耗、脚本节省量、并发 Worker、稳定性与定时监控统计） |
+| GET | `/api/update/status` | 查询参数 `auto?` | `UpdateStatus`（读取当前版本与缓存的更新状态，`auto=1` 触发首次后台静默检测） |
+| POST | `/api/update/check` | – | `UpdateStatus`（立即向 GitHub Releases 查询最新版本） |
+| POST | `/api/update/apply` | 查询参数 `wait?` | `UpdateStatus`（后台下载更新包、校验 SHA-256 并执行静默覆盖更新重启） |
 | GET | `/api/chats` | 查询参数 `limit?` | `ChatSession[]` |
 | POST | `/api/chats` | `{title?}` | `ChatSession` |
 | GET | `/api/chats/{id}` | – | `ChatSession & {messages: ChatMessage[], workers: Worker[]}` |

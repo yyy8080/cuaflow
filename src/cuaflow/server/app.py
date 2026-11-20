@@ -109,7 +109,7 @@ def create_app(svc: Services, token: str | None = None) -> FastAPI:
             raise HTTPException(404, f"{what} not found")
         return obj
 
-    # ------------------------------------------------------------------ 健康检查与统计信息
+    # ------------------------------------------------------------------ 健康检查、版本更新与统计信息
     @app.get("/api/health")
     def health() -> dict[str, Any]:
         return {"ok": True, "version": __version__, "platform": sys.platform}
@@ -117,6 +117,27 @@ def create_app(svc: Services, token: str | None = None) -> FastAPI:
     @app.get("/api/stats", dependencies=A)
     def stats() -> dict[str, Any]:
         return store.global_stats()
+
+    @app.get("/api/update/status", dependencies=A)
+    def update_status(auto: bool = False) -> dict[str, Any]:
+        cur = svc.updater.status_dict()
+        if auto and not cur.get("checked_at") and cur.get("status") == "idle":
+            import threading
+
+            threading.Thread(
+                target=lambda: svc.updater.check_for_updates(force=False),
+                name="cuaflow-auto-update-check",
+                daemon=True,
+            ).start()
+        return cur
+
+    @app.post("/api/update/check", dependencies=A)
+    def update_check() -> dict[str, Any]:
+        return svc.updater.check_for_updates(force=True)
+
+    @app.post("/api/update/apply", dependencies=A)
+    def update_apply(wait: bool = False) -> dict[str, Any]:
+        return svc.updater.start_apply_update(async_run=not wait)
 
     # ------------------------------------------------------------------ 主智能体对话与并行子智能体池
     @app.get("/api/chats", dependencies=A)

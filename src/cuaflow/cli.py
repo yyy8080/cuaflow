@@ -330,6 +330,32 @@ def install_browser():
     raise typer.Exit(code)
 
 
+@app.command("update")
+def update_cmd(
+    check_only: bool = typer.Option(False, "--check", "-c", help="仅检测远端最新版本，不执行安装"),
+):
+    """检测 GitHub Releases 最新版本并按需执行一键在线更新。"""
+    from cuaflow.updater import UpdateManager
+
+    mgr = UpdateManager()
+    info = mgr.check_for_updates(force=True)
+    if info.get("status") == "error":
+        console.print(f"❌ {info.get('error') or info.get('message')}")
+        raise typer.Exit(1)
+    console.print(f"当前版本: v{info['current_version']}  |  最新版本: v{info['latest_version']}  |  模式: {info['install_mode']}")
+    if not info.get("has_update"):
+        console.print("✅ 当前已是最新版本。")
+        return
+    console.print(f"🚀 发现新版本 v{info['latest_version']} ({info.get('release_url')})")
+    if check_only:
+        return
+    res = mgr.start_apply_update(async_run=False)
+    if res.get("status") == "error":
+        console.print(f"❌ {res.get('error')}")
+        raise typer.Exit(1)
+    console.print(f"✅ {res.get('message')}")
+
+
 @app.command()
 def doctor(ping: bool = typer.Option(False, help="send a tiny request to each configured model")):
     """检查安装与运行环境：Python 运行时、浏览器（Chromium/Edge/Chrome）、Windows 自动化依赖库及模型密钥。"""

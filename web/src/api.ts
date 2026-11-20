@@ -333,7 +333,42 @@ export type Settings = {
   };
 };
 
+export type UpdateStateKind =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'up_to_date'
+  | 'downloading'
+  | 'verifying'
+  | 'installing'
+  | 'restarting'
+  | 'done'
+  | 'error';
+
+export type UpdateStatus = {
+  current_version: string;
+  latest_version: string;
+  tag_name: string;
+  has_update: boolean;
+  status: UpdateStateKind;
+  install_mode: string;
+  can_self_update: boolean;
+  repo: string;
+  release_url: string;
+  release_notes?: string;
+  published_at?: string;
+  checked_at?: string;
+  asset_name?: string;
+  asset_url?: string;
+  asset_size?: number;
+  downloaded_bytes?: number;
+  progress_pct?: number;
+  message?: string;
+  error?: string;
+};
+
 export type EventType =
+  | 'update_status'
   | 'chat_message'
   | 'chat_status'
   | 'worker_updated'
@@ -457,6 +492,11 @@ export function wsUrl(): string {
 export const api = {
   health: () => request<{ ok: boolean; version: string; platform: string }>('GET', '/api/health'),
   stats: () => request<GlobalStats>('GET', '/api/stats'),
+
+  updateStatus: (auto = false) =>
+    request<UpdateStatus>('GET', `/api/update/status${qs({ auto: auto ? 1 : undefined })}`),
+  checkUpdate: () => request<UpdateStatus>('POST', '/api/update/check'),
+  applyUpdate: (wait = false) => request<UpdateStatus>('POST', `/api/update/apply${qs({ wait: wait ? 1 : undefined })}`),
 
   listChats: (limit = 80) => request<ChatSession[]>('GET', `/api/chats${qs({ limit })}`),
   createChat: (title = '新对话') => request<ChatSession>('POST', '/api/chats', { title }),

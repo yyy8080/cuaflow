@@ -31,14 +31,14 @@ flowchart TD
 
 ### 方式一：Windows 安装包直接安装（推荐，免装 Python / Node.js）
 
-1. 前往 [GitHub Releases](https://github.com/yyy8080/cuaflow/releases) 下载 **`cuaflow-setup-0.2.1-win64.exe`**（或绿色免安装版 `cuaflow-portable-0.2.1-win64.zip`）。
+1. 前往 [GitHub Releases](https://github.com/yyy8080/cuaflow/releases) 下载 **`cuaflow-setup-0.2.2-win64.exe`**（或绿色免安装版 `cuaflow-portable-0.2.2-win64.zip`）。
 2. 双击运行安装向导（无需管理员权限，自动创建桌面快捷方式并可选加入 `PATH` 与开机自启持续巡检）。
 3. 双击桌面 **cuaflow** 图标，直接打开**一体化多智能体对话工作台窗口**；点击左侧 **「⚙️ 设置」** 直接粘贴模型 API Key 保存即可开始与主智能体对话（自动调用系统自带 Microsoft Edge / Chrome，无需额外下载浏览器内核）。
 
 ### 方式二：本地一键打包生成安装包
 
 ```powershell
-# Windows（生成 dist\cuaflow-setup-0.2.1-win64.exe 与便携版 .zip，需本机已装 Python 3.11+、Node.js 与 Inno Setup 6）
+# Windows（生成 dist\cuaflow-setup-0.2.2-win64.exe 与便携版 .zip，需本机已装 Python 3.11+、Node.js 与 Inno Setup 6）
 powershell -ExecutionPolicy Bypass -File .\packaging\build_windows.ps1
 # 如需把独立 Chromium 一并打进全离线包，加 -BundleChromium 参数：
 powershell -ExecutionPolicy Bypass -File .\packaging\build_windows.ps1 -BundleChromium

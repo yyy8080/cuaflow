@@ -79,7 +79,13 @@ def _find_app_shell_browser() -> str | None:
     return None
 
 
-def _open_standalone_webui(console_url: str, data_root: Path, *, wait: bool = True) -> str:
+def _open_standalone_webui(
+    console_url: str,
+    data_root: Path,
+    *,
+    wait: bool = True,
+    close_hooks: list[Any] | None = None,
+) -> str:
     """以单一独立桌面应用窗口打开内置 WebUI，返回实际采用的外壳模式名称。
 
     优先级：
@@ -91,13 +97,15 @@ def _open_standalone_webui(console_url: str, data_root: Path, *, wait: bool = Tr
         try:
             import webview  # type: ignore[import-not-found]
 
-            webview.create_window(
+            win = webview.create_window(
                 "cuaflow — 多智能体对话工作台",
                 console_url,
                 width=1420,
                 height=900,
                 min_size=(980, 640),
             )
+            if close_hooks is not None:
+                close_hooks.append(win.destroy)
             webview.start()
             return "pywebview"
         except Exception:  # noqa: BLE001
@@ -124,6 +132,8 @@ def _open_standalone_webui(console_url: str, data_root: Path, *, wait: bool = Tr
                 stderr=subprocess.DEVNULL,
                 creationflags=creationflags,
             )
+            if close_hooks is not None:
+                close_hooks.append(proc.terminate)
             if not wait:
                 return "app_window_detached"
             started = time.monotonic()
@@ -214,17 +224,26 @@ def main(argv: list[str] | None = None) -> int:
         encoding="utf-8",
     )
 
+    close_hooks: list[Any] = []
+
     def stop_server() -> None:
         server.should_exit = True
+        for hook in list(close_hooks):
+            try:
+                hook()
+            except Exception:  # noqa: BLE001
+                pass
         try:
             svc.close()
         except Exception:  # noqa: BLE001
             pass
 
+    svc.updater.set_shutdown_callback(stop_server)
+
     try:
         # 标准桌面模式：直接打开单一独立 WebUI 窗口，关闭窗口时自动安全停止内置服务
         if not args.no_gui and not args.no_browser:
-            mode = _open_standalone_webui(console_url, root, wait=True)
+            mode = _open_standalone_webui(console_url, root, wait=True, close_hooks=close_hooks)
             if mode in ("pywebview", "app_window_closed"):
                 stop_server()
                 srv_thread.join(timeout=5.0)

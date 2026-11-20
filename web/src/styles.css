@@ -2185,3 +2185,108 @@ pre.json,
     border-top: 1px solid var(--border);
   }
 }
+
+/* ---------------------------------------------------------------- 版本检测与在线更新 */
+
+.sidebar-foot-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.version-pill {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev-2);
+  color: var(--text-dim);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.version-pill:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.version-pill.has-update {
+  border-color: color-mix(in srgb, var(--warning) 55%, var(--border));
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+.version-new-dot {
+  font-weight: 700;
+}
+
+.update-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.update-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.update-ver-group {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.update-msg {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.update-progress-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.update-progress-track {
+  flex: 1;
+  height: 8px;
+  background: var(--bg-elev-2);
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.update-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 0.2s ease;
+}
+.update-release-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 2px;
+}
+.update-notes {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  line-height: 1.55;
+  max-height: 180px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.update-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
