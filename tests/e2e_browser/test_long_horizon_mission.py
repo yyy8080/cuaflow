@@ -554,17 +554,21 @@ def test_stateful_spa_pagination_loop_and_live_browser_observe(tmp_path: Path, s
       document.getElementById('row').textContent = 'ITEM-' + window._idx;
       if (window._idx >= 4) document.getElementById('next-btn').remove();
     ">下一页</button></body></html>"""
-    site_dir = tmp_path / "spa"
-    site_dir.mkdir()
-    (site_dir / "index.html").write_text(spa_html, encoding="utf-8")
+    class SpaHandler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args, **kwargs):
+            return
 
-    import functools
+        def do_GET(self):
+            data = spa_html.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
 
-    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(site_dir))
-    handler.log_message = lambda *a, **k: None  # type: ignore[attr-defined]
-    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), SpaHandler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    spa_url = f"http://127.0.0.1:{srv.server_address[1]}/index.html"
+    spa_url = f"http://127.0.0.1:{srv.server_address[1]}/spa"
     try:
         page_flow_src = textwrap.dedent('''
             from cuaflow.flow import Ctx, Flow, expect
@@ -605,7 +609,12 @@ def test_stateful_spa_pagination_loop_and_live_browser_observe(tmp_path: Path, s
                     "args": {
                         "code": (
                             "p = c.browser.page()\n"
-                            f"p.goto('{spa_url}')\n"
+                            "for _i in range(3):\n"
+                            "    try:\n"
+                            f"        p.goto('{spa_url}'); break\n"
+                            "    except Exception:\n"
+                            "        if _i == 2: raise\n"
+                            "        p.wait_for_timeout(300)\n"
                             "c.browser.wait_stable(p, timeout=5, idle_ms=100)\n"
                             "print(p.url)"
                         )
@@ -642,7 +651,7 @@ def test_stateful_spa_pagination_loop_and_live_browser_observe(tmp_path: Path, s
 
         task = svc.orchestrator.submit_task("遍历 SPA 全部页", mode="mission", enqueue=False)
         task = svc.orchestrator.process_task(task["id"], unattended=True)
-        assert task["status"] == "succeeded", task
+        assert task["status"] == "succeeded", f"FINAL={task.get('final_response')} CKPT={task.get('checkpoint')}"
         assert "pages_out" in task["checkpoint"]["mission_state"], task["checkpoint"]
         items = [x["item"] for x in task["checkpoint"]["mission_state"]["pages_out"]]
         # Stopped automatically after 4 pages (out of max_iterations=10) when has_next became False!

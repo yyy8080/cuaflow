@@ -69,9 +69,9 @@ class RunnerClient:
             )  # type: ignore[attr-defined]
         else:
             kwargs["start_new_session"] = True
-        log = open(self.log_path, "a", encoding="utf-8") if self.log_path else subprocess.DEVNULL  # noqa: SIM115
         if self.log_path:
             self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        log = open(self.log_path, "a", encoding="utf-8") if self.log_path else subprocess.DEVNULL  # noqa: SIM115
         cmd = [self.python, "--runner-proc"] if is_frozen_self else [self.python, "-u", "-m", "cuaflow.flow.proc"]
         self.proc = subprocess.Popen(
             cmd,
