@@ -201,6 +201,129 @@ def to_response(item: Any) -> LLMResponse:
                 content=item.get("content", ""),
                 tool_calls=[ToolCall(id=item.get("id", f"call_{random.randrange(1 << 30)}"),
                                      name=item["tool"], arguments=item.get("args", {}))],
+                usage=dict(item.get("usage") or {}),
             )
         return LLMResponse(content=json.dumps(item, ensure_ascii=False))
     raise TypeError(f"unsupported fake response: {item!r}")
+
+
+# ---------------------------------------------------------------------------
+# Token usage & script savings metering
+# ---------------------------------------------------------------------------
+
+import contextlib
+import contextvars
+import threading
+
+
+def _approx_msg_tokens(obj: Any) -> int:
+    """Rough token estimate when a provider/mock omits usage (avoids counting raw base64 bytes)."""
+    if isinstance(obj, str):
+        return max(1, len(obj) // 4) if obj else 0
+    if isinstance(obj, list):
+        total = 0
+        for item in obj:
+            if isinstance(item, dict) and item.get("type") == "image_url":
+                total += 765
+            else:
+                total += _approx_msg_tokens(item)
+        return total
+    if isinstance(obj, dict):
+        if obj.get("type") == "image_url":
+            return 765
+        return sum(_approx_msg_tokens(v) for k, v in obj.items() if k != "raw")
+    return 0
+
+
+class UsageMeter:
+    """Thread-safe accumulator for LLM token spend vs zero-token scripted step savings."""
+
+    def __init__(self, tokens_per_script_step: int = 1800, initial: dict[str, Any] | None = None):
+        self._lock = threading.Lock()
+        self.tokens_per_script_step = max(0, int(tokens_per_script_step))
+        init = dict(initial or {})
+        self.llm_calls: int = int(init.get("llm_calls") or 0)
+        self.prompt_tokens: int = int(init.get("prompt_tokens") or 0)
+        self.completion_tokens: int = int(init.get("completion_tokens") or 0)
+        self.script_steps: int = int(init.get("script_steps") or 0)
+        self.estimated_tokens_saved: int = int(init.get("estimated_tokens_saved") or 0)
+        self.by_role: dict[str, dict[str, int]] = {
+            k: dict(v) for k, v in (init.get("by_role") or {}).items() if isinstance(v, dict)
+        }
+
+    def record_llm(self, role: str, messages: list[dict[str, Any]], resp: LLMResponse) -> None:
+        u = resp.usage or {}
+        pt = int(u.get("prompt_tokens") or u.get("input_tokens") or 0)
+        ct = int(u.get("completion_tokens") or u.get("output_tokens") or 0)
+        if pt == 0 and ct == 0:
+            pt = _approx_msg_tokens(messages)
+            ct = _approx_msg_tokens(resp.content) + sum(
+                _approx_msg_tokens(tc.raw_arguments or tc.arguments) + 8 for tc in resp.tool_calls
+            )
+        with self._lock:
+            self.llm_calls += 1
+            self.prompt_tokens += pt
+            self.completion_tokens += ct
+            bucket = self.by_role.setdefault(role, {"calls": 0, "tokens": 0})
+            bucket["calls"] += 1
+            bucket["tokens"] += pt + ct
+
+    def record_script_step(self, saved_tokens: int | None = None) -> None:
+        gain = self.tokens_per_script_step if saved_tokens is None else max(0, int(saved_tokens))
+        with self._lock:
+            self.script_steps += 1
+            self.estimated_tokens_saved += gain
+
+    def merge_from(self, other: dict[str, Any] | "UsageMeter" | None) -> None:
+        if not other:
+            return
+        d = other.snapshot() if isinstance(other, UsageMeter) else other
+        with self._lock:
+            self.llm_calls += int(d.get("llm_calls") or 0)
+            self.prompt_tokens += int(d.get("prompt_tokens") or 0)
+            self.completion_tokens += int(d.get("completion_tokens") or 0)
+            self.script_steps += int(d.get("script_steps") or 0)
+            self.estimated_tokens_saved += int(d.get("estimated_tokens_saved") or 0)
+            for role, rv in (d.get("by_role") or {}).items():
+                if isinstance(rv, dict):
+                    b = self.by_role.setdefault(role, {"calls": 0, "tokens": 0})
+                    b["calls"] += int(rv.get("calls") or 0)
+                    b["tokens"] += int(rv.get("tokens") or 0)
+
+    def snapshot(self) -> dict[str, Any]:
+        with self._lock:
+            total = self.prompt_tokens + self.completion_tokens
+            denom = total + self.estimated_tokens_saved
+            return {
+                "llm_calls": self.llm_calls,
+                "prompt_tokens": self.prompt_tokens,
+                "completion_tokens": self.completion_tokens,
+                "total_tokens": total,
+                "script_steps": self.script_steps,
+                "estimated_tokens_saved": self.estimated_tokens_saved,
+                "savings_ratio": round(self.estimated_tokens_saved / denom, 4) if denom > 0 else 0.0,
+                "by_role": {k: dict(v) for k, v in self.by_role.items()},
+            }
+
+
+_ACTIVE_METERS: contextvars.ContextVar[tuple[UsageMeter, ...]] = contextvars.ContextVar("_ACTIVE_METERS", default=())
+
+
+def record_active_llm_usage(role: str, messages: list[dict[str, Any]], resp: LLMResponse) -> None:
+    for meter in _ACTIVE_METERS.get():
+        meter.record_llm(role, messages, resp)
+
+
+def record_active_script_step(saved_tokens: int | None = None) -> None:
+    for meter in _ACTIVE_METERS.get():
+        meter.record_script_step(saved_tokens)
+
+
+@contextlib.contextmanager
+def usage_scope(meter: UsageMeter):
+    stack = _ACTIVE_METERS.get()
+    token = _ACTIVE_METERS.set((*stack, meter))
+    try:
+        yield meter
+    finally:
+        _ACTIVE_METERS.reset(token)

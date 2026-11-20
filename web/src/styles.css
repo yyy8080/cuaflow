@@ -1447,3 +1447,72 @@ pre.json,
   color: var(--text-dim);
   line-height: 1.8;
 }
+
+/* ---------------------------------------------------------------- kpi & mission */
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.kpi-card {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.kpi-label {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.kpi-val {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.kpi-val.accent {
+  color: var(--success);
+}
+.kpi-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.phase-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.phase-pill {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev-2);
+  color: var(--text-dim);
+}
+.phase-pill.phase-done {
+  border-color: color-mix(in srgb, var(--success) 50%, transparent);
+  color: var(--success);
+}
+.phase-pill.phase-running {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.phase-pill.phase-failed {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.lvl-L1\.5 {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+}

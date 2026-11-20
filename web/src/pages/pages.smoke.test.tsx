@@ -69,6 +69,44 @@ function route(url: string): unknown {
   if (p === '/api/runs/run42') return run;
   if (p === '/api/runs/run42/events') return events;
   if (p === '/api/tasks') return [task];
+  if (p === '/api/stats') {
+    return {
+      flows: 1,
+      auto_repairs: 1,
+      flow_runs: 4,
+      flow_successes: 3,
+      flow_success_rate: 0.75,
+      tasks: 1,
+      tasks_succeeded: 1,
+      llm_calls: 5,
+      total_tokens: 2400,
+      script_steps: 12,
+      estimated_tokens_saved: 21600,
+      savings_ratio: 0.9,
+      schedules_active: 1,
+      schedules_tripped: 0,
+    };
+  }
+  if (p === '/api/schedules') {
+    return [
+      {
+        id: 'sched1',
+        name: '每5分钟报表巡检',
+        kind: 'flow',
+        flow_id: 'export_report',
+        params: {},
+        interval_seconds: 300,
+        enabled: true,
+        max_consecutive_failures: 3,
+        runs_count: 5,
+        success_count: 5,
+        consecutive_failures: 0,
+        status: 'active',
+        created_at: '2024-01-03T00:00:00Z',
+        updated_at: '2024-01-03T00:00:00Z',
+      },
+    ];
+  }
   if (p === '/api/tickets') return u.searchParams.get('status') === 'open' ? [ticket] : [];
   if (p === '/api/settings') return settings;
   return null;
@@ -132,7 +170,14 @@ describe('pages render with mocked API', () => {
     const t = await render('/');
     expect(t).toContain('导出十月报表');
     expect(t).toContain('直接复用');
+    expect(t).toContain('21.6k');
     expect(container.querySelector('.nav-count')?.textContent).toBe('1');
+  });
+
+  it('schedules page', async () => {
+    const t = await render('/schedules');
+    expect(t).toContain('每5分钟报表巡检');
+    expect(t).toContain('监控中');
   });
 
   it('flows list and detail', async () => {

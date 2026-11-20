@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from cuaflow import __version__
 from cuaflow.config import Settings
+from cuaflow.library.store import future_iso
 from cuaflow.services import Services
 
 STATIC = Path(__file__).parent / "static"
@@ -24,6 +25,8 @@ class RunRequest(BaseModel):
     params: dict[str, Any] = {}
     version: int | None = None
     from_step: str | None = None
+    resume_checkpoint: bool = False
+    unattended: bool | None = None
 
 
 class RollbackRequest(BaseModel):
@@ -35,6 +38,28 @@ class TaskRequest(BaseModel):
     start_url: str | None = None
     params: dict[str, Any] = {}
     force_new: bool = False
+    mode: str = "auto"
+
+
+class ScheduleCreateRequest(BaseModel):
+    name: str
+    interval_seconds: int = 300
+    kind: str = "flow"
+    flow_id: str | None = None
+    instruction: str | None = None
+    start_url: str | None = None
+    params: dict[str, Any] = {}
+    max_runs: int | None = None
+    max_consecutive_failures: int = 3
+    enabled: bool = True
+    run_immediately: bool = False
+
+
+class ScheduleUpdateRequest(BaseModel):
+    enabled: bool | None = None
+    interval_seconds: int | None = None
+    max_consecutive_failures: int | None = None
+    reset_breaker: bool = False
 
 
 class ResolveRequest(BaseModel):
@@ -61,10 +86,14 @@ def create_app(svc: Services, token: str | None = None) -> FastAPI:
             raise HTTPException(404, f"{what} not found")
         return obj
 
-    # ------------------------------------------------------------------ health
+    # ------------------------------------------------------------------ health & stats
     @app.get("/api/health")
     def health() -> dict[str, Any]:
         return {"ok": True, "version": __version__, "platform": sys.platform}
+
+    @app.get("/api/stats", dependencies=A)
+    def stats() -> dict[str, Any]:
+        return store.global_stats()
 
     # ------------------------------------------------------------------ flows
     @app.get("/api/flows", dependencies=A)
@@ -84,7 +113,8 @@ def create_app(svc: Services, token: str | None = None) -> FastAPI:
     def run_flow(flow_id: str, req: RunRequest) -> dict[str, Any]:
         need(store.get_flow(flow_id), "flow")
         try:
-            return orch.submit_run(flow_id, req.params, version=req.version, from_step=req.from_step)
+            return orch.submit_run(flow_id, req.params, version=req.version, from_step=req.from_step,
+                                   resume_checkpoint=req.resume_checkpoint, unattended=req.unattended)
         except KeyError as exc:
             raise HTTPException(404, str(exc)) from None
 
@@ -104,12 +134,14 @@ def create_app(svc: Services, token: str | None = None) -> FastAPI:
         store.delete_flow(flow_id)
         return {"ok": True}
 
-    # ------------------------------------------------------------------ tasks
+    # ------------------------------------------------------------------ tasks (missions)
     @app.post("/api/tasks", dependencies=A)
     def create_task(req: TaskRequest) -> dict[str, Any]:
         if not req.instruction.strip():
             raise HTTPException(400, "instruction is empty")
-        return orch.submit_task(req.instruction, req.start_url, req.params, req.force_new)
+        if req.mode not in ("auto", "mission", "single"):
+            raise HTTPException(400, f"invalid mode {req.mode!r}")
+        return orch.submit_task(req.instruction, req.start_url, req.params, req.force_new, mode=req.mode)
 
     @app.get("/api/tasks", dependencies=A)
     def tasks() -> list[dict[str, Any]]:
@@ -118,6 +150,86 @@ def create_app(svc: Services, token: str | None = None) -> FastAPI:
     @app.get("/api/tasks/{task_id}", dependencies=A)
     def task(task_id: str) -> dict[str, Any]:
         return need(store.get_task(task_id), "task")
+
+    @app.get("/api/tasks/{task_id}/events", dependencies=A)
+    def task_events(task_id: str, after_seq: int = 0) -> list[dict[str, Any]]:
+        need(store.get_task(task_id), "task")
+        return store.list_task_events(task_id, after_seq)
+
+    @app.post("/api/tasks/{task_id}/resume", dependencies=A)
+    def resume_task(task_id: str) -> dict[str, Any]:
+        need(store.get_task(task_id), "task")
+        return orch.resume_task(task_id)
+
+    @app.post("/api/tasks/{task_id}/abort", dependencies=A)
+    def abort_task(task_id: str) -> dict[str, Any]:
+        need(store.get_task(task_id), "task")
+        orch.abort(task_id)
+        return store.get_task(task_id)  # type: ignore[return-value]
+
+    # ------------------------------------------------------------------ schedules (continuous monitors)
+    @app.get("/api/schedules", dependencies=A)
+    def list_schedules() -> list[dict[str, Any]]:
+        return store.list_schedules()
+
+    @app.post("/api/schedules", dependencies=A)
+    def create_schedule(req: ScheduleCreateRequest) -> dict[str, Any]:
+        if not req.name.strip():
+            raise HTTPException(400, "schedule name is empty")
+        if req.kind == "flow":
+            if not req.flow_id or store.get_flow(req.flow_id) is None:
+                raise HTTPException(404, f"flow {req.flow_id!r} not found")
+        elif req.kind == "task":
+            if not (req.instruction or "").strip():
+                raise HTTPException(400, "task schedule requires instruction")
+        else:
+            raise HTTPException(400, f"invalid schedule kind {req.kind!r}")
+        sc = store.create_schedule(
+            req.name.strip(),
+            req.interval_seconds,
+            kind=req.kind,
+            flow_id=req.flow_id,
+            instruction=req.instruction,
+            start_url=req.start_url,
+            params=req.params,
+            max_runs=req.max_runs,
+            max_consecutive_failures=req.max_consecutive_failures,
+            enabled=req.enabled,
+            run_immediately=req.run_immediately,
+        )
+        if req.run_immediately and req.enabled:
+            orch.jobs.put(("schedule", sc["id"], None))
+        return sc
+
+    @app.patch("/api/schedules/{schedule_id}", dependencies=A)
+    def patch_schedule(schedule_id: str, req: ScheduleUpdateRequest) -> dict[str, Any]:
+        sc = need(store.get_schedule(schedule_id), "schedule")
+        fields: dict[str, Any] = {}
+        if req.interval_seconds is not None:
+            fields["interval_seconds"] = max(5, int(req.interval_seconds))
+        if req.max_consecutive_failures is not None:
+            fields["max_consecutive_failures"] = max(1, int(req.max_consecutive_failures))
+        if req.reset_breaker:
+            fields.update(consecutive_failures=0, enabled=True, status="active",
+                          next_run_at=future_iso(fields.get("interval_seconds", sc["interval_seconds"])))
+        elif req.enabled is not None:
+            fields["enabled"] = bool(req.enabled)
+            fields["status"] = "active" if req.enabled else "paused"
+            if req.enabled:
+                fields["next_run_at"] = future_iso(fields.get("interval_seconds", sc["interval_seconds"]))
+        return store.update_schedule(schedule_id, **fields)
+
+    @app.post("/api/schedules/{schedule_id}/trigger", dependencies=A)
+    def trigger_schedule(schedule_id: str) -> dict[str, Any]:
+        sc = need(store.get_schedule(schedule_id), "schedule")
+        orch.jobs.put(("schedule", schedule_id, None))
+        return {"ok": True, "schedule": sc}
+
+    @app.delete("/api/schedules/{schedule_id}", dependencies=A)
+    def delete_schedule(schedule_id: str) -> dict[str, Any]:
+        need(store.get_schedule(schedule_id), "schedule")
+        store.delete_schedule(schedule_id)
+        return {"ok": True}
 
     # ------------------------------------------------------------------ runs
     @app.get("/api/runs", dependencies=A)
@@ -191,6 +303,9 @@ def create_app(svc: Services, token: str | None = None) -> FastAPI:
         def on_event(ev: dict[str, Any]) -> None:
             run_id = filt.get("run_id")
             if run_id and ev.get("run_id") != run_id:
+                return
+            task_id = filt.get("task_id")
+            if task_id and ev.get("task_id") != task_id:
                 return
             try:
                 loop.call_soon_threadsafe(q.put_nowait, ev)

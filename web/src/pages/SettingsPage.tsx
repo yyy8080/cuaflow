@@ -144,7 +144,7 @@ export function SettingsPage() {
         </div>
       </Card>
 
-      <Card title="监督策略">
+      <Card title="监督者与自主自愈策略">
         <div className="form-grid">
           <div className="field">
             <label>L2（视觉/语义）检查策略</label>
@@ -169,7 +169,7 @@ export function SettingsPage() {
             />
           </div>
           <div className="field">
-            <label>最大修复尝试次数</label>
+            <label>最大代码修复尝试次数（Tier 1）</label>
             <input
               type="number"
               min={0}
@@ -189,6 +189,46 @@ export function SettingsPage() {
               onChange={(e) => setSup('rollback_after_failures', Math.max(1, parseInt(e.target.value, 10) || 1))}
             />
           </div>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={sup.l15_sentinel ?? true}
+              onChange={(e) => setSup('l15_sentinel', e.target.checked)}
+            />
+            启用 L1.5 零 Token 浏览器运行时哨兵（HTTP/JS/白屏/登录失效检测）
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={sup.adaptive_l2 ?? true}
+              onChange={(e) => setSup('adaptive_l2', e.target.checked)}
+            />
+            运行时异常时自适应升级触发 L2 视觉校验
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={sup.tier0_heal ?? true}
+              onChange={(e) => setSup('tier0_heal', e.target.checked)}
+            />
+            启用 Tier-0 零 Token 浏览器自愈（清理弹窗/多余标签页/重连）
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={sup.autonomous_fallback ?? true}
+              onChange={(e) => setSup('autonomous_fallback', e.target.checked)}
+            />
+            启用 Tier-2 AI 自主接管兜底（单步修补不足时由 AI 接管恢复现场）
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={sup.unattended ?? false}
+              onChange={(e) => setSup('unattended', e.target.checked)}
+            />
+            全局无人值守模式（不挂起等待人工工单）
+          </label>
           <label className="check">
             <input type="checkbox" checked={sup.l3_enabled} onChange={(e) => setSup('l3_enabled', e.target.checked)} />
             启用 L3 最终结果校验

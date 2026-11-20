@@ -1,4 +1,4 @@
-"""Tools shared by Author and Repairer, plus the step verifier (Supervisor L0/L1/L2 checks)."""
+"""Tools shared by Author, Repairer, Fallback and Planner, plus StepVerifier (Supervisor L0/L1/L1.5/L2 checks)."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from cuaflow.agents.judge import judge_step
 from cuaflow.agents.loop import Tool, ToolResult
+from cuaflow.agents.sentinel import SentinelReport, inspect_step
 from cuaflow.flow.client import RunnerClient, RunnerDied, RunnerError, RunnerTimeout
 from cuaflow.flow.engine import latest_checkpoint_state, now_iso
 from cuaflow.llm.base import LLM, tool_spec
@@ -32,15 +33,23 @@ def check(level: str, passed: bool, detail: str) -> dict[str, Any]:
 
 
 class StepVerifier:
-    """Turns a raw runner step result into Supervisor checks and a pass/fail decision."""
+    """Turns a raw runner step result into Supervisor checks (L0 -> L1 -> L1.5 Sentinel -> L2 Judge)."""
 
-    def __init__(self, judge_llm: LLM | None, run_dir: Path, intent: str = ""):
+    def __init__(self, judge_llm: LLM | None, run_dir: Path, intent: str = "",
+                 l15_enabled: bool = True, adaptive_l2: bool = True):
         self.judge_llm = judge_llm
         self.run_dir = Path(run_dir)
         self.intent = intent
+        self.l15_enabled = l15_enabled
+        self.adaptive_l2 = adaptive_l2
+        self._last_fingerprint: str | None = None
+        self._last_state: dict[str, Any] | None = None
+        self.last_sentinel: SentinelReport | None = None
 
-    def verify(self, step: dict[str, Any], result: dict[str, Any], use_l2: bool) -> tuple[bool, list[dict]]:
+    def verify(self, step: dict[str, Any], result: dict[str, Any], use_l2: bool,
+               step_stats: dict[str, Any] | None = None) -> tuple[bool, list[dict]]:
         checks: list[dict[str, Any]] = []
+        self.last_sentinel = None
         if result.get("error_kind") == "exception":
             checks.append(check("L0", False, result.get("error") or "exception"))
             return False, checks
@@ -49,20 +58,57 @@ class StepVerifier:
             return False, checks
         checks.append(check("L0", True, f"completed in {result.get('duration_ms', 0)} ms"))
         if result.get("error_kind") == "expectation":
+            # Even when an expectation failed, inspect whether CAPTCHA gated the page so we don't try to bypass it.
+            sr = inspect_step(step, result)
+            self.last_sentinel = sr
+            if sr.blocker_kind == "captcha":
+                result["error_kind"] = "captcha_blocked"
+                result["error"] = sr.detail
+                checks.append(check("L1.5", False, sr.detail))
+                return False, checks
             checks.append(check("L1", False, result.get("error") or "expectation failed"))
             return False, checks
+
         new_modals = (result.get("observation") or {}).get("new_modal_dialogs") or []
         detail = "assertions passed"
         if new_modals:
             detail += f"; warning: new modal dialog(s) appeared: {new_modals}"
         checks.append(check("L1", True, detail))
-        if use_l2 and self.judge_llm is not None:
-            verdict = judge_step(self.judge_llm, step, result, self.run_dir, self.intent)
+
+        sentinel_anomaly = False
+        if self.l15_enabled:
+            sr = inspect_step(
+                step,
+                result,
+                prev_fingerprint=self._last_fingerprint,
+                prev_state=self._last_state,
+                step_stats=step_stats,
+            )
+            self.last_sentinel = sr
+            if not sr.passed:
+                result["error_kind"] = "captcha_blocked" if sr.blocker_kind == "captcha" else (sr.blocker_kind or "sentinel")
+                result["error"] = sr.detail
+                checks.append(check("L1.5", False, sr.detail))
+                return False, checks
+            if sr.anomaly:
+                sentinel_anomaly = True
+                checks.append(check("L1.5", True, sr.detail))
+            if sr.dom_fingerprint:
+                self._last_fingerprint = sr.dom_fingerprint
+            self._last_state = dict(result.get("state") or {})
+
+        effective_l2 = use_l2 or (sentinel_anomaly and self.adaptive_l2)
+        if effective_l2 and self.judge_llm is not None:
+            verdict = judge_step(self.judge_llm, step, result, self.run_dir, self.intent,
+                                 extra_warnings=self.last_sentinel.warnings if self.last_sentinel else None)
             if verdict["passed"] is None:
                 checks.append(check("L2", True, f"skipped ({verdict['reason']})"))
             else:
-                checks.append(check("L2", bool(verdict["passed"]), verdict["reason"]))
+                tag = " [adaptive-trigger]" if (not use_l2 and sentinel_anomaly) else ""
+                checks.append(check("L2", bool(verdict["passed"]), verdict["reason"] + tag))
                 if not verdict["passed"]:
+                    result["error_kind"] = "l2_judge"
+                    result["error"] = verdict["reason"]
                     return False, checks
         return True, checks
 
@@ -79,6 +125,11 @@ def format_step_result(result: dict[str, Any], checks: list[dict[str, Any]], pas
     obs = result.get("observation") or {}
     if obs.get("url"):
         lines.append(f"Browser: {obs['url']} | {obs.get('title')}")
+    tel = obs.get("browser_telemetry") or {}
+    if tel.get("http_errors"):
+        lines.append(f"HTTP errors: {tel['http_errors'][:5]}")
+    if tel.get("page_errors"):
+        lines.append(f"JS page errors: {tel['page_errors'][:3]}")
     if obs.get("foreground"):
         lines.append(f"Foreground window: {obs['foreground'].get('title')!r}")
     if obs.get("modal_dialogs"):
@@ -125,6 +176,11 @@ def common_tools(runner: RunnerClient, run_dir: Path, shell: ShellBackend,
         lines = []
         if obs.get("url"):
             lines.append(f"Browser URL: {obs['url']}\nTitle: {obs.get('title')}")
+        health = obs.get("page_health") or {}
+        if health.get("alerts"):
+            lines.append(f"Visible alerts: {health['alerts']}")
+        if health.get("captcha_detected"):
+            lines.append("BLOCKER: CAPTCHA / human verification challenge detected on page. Do NOT attempt to solve or bypass it.")
         if obs.get("foreground"):
             lines.append(f"Foreground window: {json.dumps(obs['foreground'], ensure_ascii=False)}")
         if obs.get("modal_dialogs"):

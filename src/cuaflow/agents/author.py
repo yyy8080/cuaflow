@@ -9,10 +9,11 @@ from cuaflow.agents.loop import Tool, ToolAgent, ToolResult
 from cuaflow.agents.supervisor import Deps
 from cuaflow.agents.tools import RunnerGuard, StepVerifier, common_tools, format_step_result, load_prompt, shot_path
 from cuaflow.agents.tracking import CancelToken, RunTracker
-from cuaflow.flow.client import RunnerError
+from cuaflow.flow.client import RunnerClient, RunnerError
 from cuaflow.flow.flow import load_flow
 from cuaflow.flow.patching import (extract_steps, remove_step, render_flow_header,
                                    reorder_steps, replace_step, validate_step_source)
+from cuaflow.llm import UsageMeter, usage_scope
 from cuaflow.llm.base import tool_spec
 
 PLAN_SCHEMA = {
@@ -32,7 +33,9 @@ PLAN_SCHEMA = {
 
 class AuthorSession:
     def __init__(self, deps: Deps, run_id: str, task: dict[str, Any], cancel: CancelToken,
-                 base_flow_id: str | None = None, base_params: dict[str, Any] | None = None):
+                 base_flow_id: str | None = None, base_params: dict[str, Any] | None = None,
+                 *, runner: RunnerClient | None = None, turn_limit: int | None = None,
+                 unattended: bool = False, extra_tags: list[str] | None = None):
         self.d, self.run_id, self.task, self.cancel = deps, run_id, task, cancel
         self.store = deps.store
         self.run_dir = self.store.run_dir(run_id)
@@ -42,6 +45,10 @@ class AuthorSession:
         self.committed: set[str] = set()
         self.params: dict[str, Any] = dict(base_params or task.get("params") or {})
         self.base_flow_id = base_flow_id
+        self._external_runner = runner
+        self._turn_limit = turn_limit
+        self._unattended = unattended
+        self._extra_tags = list(extra_tags or [])
 
     # ------------------------------------------------------------------ draft helpers
     def _source(self) -> str:
@@ -163,72 +170,78 @@ class AuthorSession:
     # ------------------------------------------------------------------ main
     def run(self) -> dict[str, Any]:
         s = self.d.settings()
+        meter = UsageMeter(tokens_per_script_step=s.planner.tokens_saved_per_step)
         tr = self.tr
         tr.status("running")
         if self.base_flow_id:
-            base = self.store.get_flow(self.base_flow_id) or {}
             self._write(self.store.read_source(self.base_flow_id))
         else:
             self._write(render_flow_header("exploration"))
-        self.d_runner = self.d.new_runner(self.run_dir)
+        owns_runner = self._external_runner is None
+        self.d_runner = self._external_runner or self.d.new_runner(self.run_dir)
         self.guard = RunnerGuard(self.d_runner, self.run_dir)
         judge = self.d.llms.get("vision_judge") if s.supervisor.l2_policy != "off" else None
-        self.verifier = StepVerifier(judge, self.run_dir, self.task.get("instruction", ""))
-        try:
+        self.verifier = StepVerifier(judge, self.run_dir, self.task.get("instruction", ""),
+                                     l15_enabled=s.supervisor.l15_sentinel, adaptive_l2=s.supervisor.adaptive_l2)
+        effective_unattended = self._unattended or s.supervisor.unattended
+        with usage_scope(meter):
             try:
-                self.d_runner.load(self.draft, self.params if self.base_flow_id else {}, self.run_dir,
-                                   **self.d.runner_opts)
-            except RunnerError:
-                self._write(render_flow_header("exploration"))
-                self.d_runner.load(self.draft, {}, self.run_dir, **self.d.runner_opts)
-            shell = self.d.shell_factory()
-            tools = common_tools(self.d_runner, self.run_dir, shell, ask_user=self.ask_user) + [
-                Tool(tool_spec("plan_flow", "Declare/revise the flow: metadata, parameters (with example values "
-                                            "from this task), output schema and ordered steps.", PLAN_SCHEMA,
-                               ["name", "params", "steps"]), self.plan_flow),
-                Tool(tool_spec("try_step", "Add/replace a planned step (full @flow.step-decorated function source) "
-                                           "and run it now in the live session; commits it if it passes.",
-                               {"source": {"type": "string"}}), self.try_step),
-                Tool(tool_spec("remove_step", "Remove a step from the plan and the flow.",
-                               {"step_id": {"type": "string"}}), self.remove),
-                Tool(tool_spec("finish", "Finish when all planned steps passed and the task is accomplished.",
-                               {"final_response": {"type": "string"}}), self.finish),
-            ]
-            agent = ToolAgent(self.d.llms.get("author"), load_prompt("author"), tools, role="author",
-                              on_log=lambda k, t: tr.log("author", k, t), should_stop=lambda: self.cancel.cancelled)
-            intro = [f"# Task\n{self.task['instruction']}"]
-            if self.task.get("start_url"):
-                intro.append(f"Start URL: {self.task['start_url']}")
-            if self.params:
-                intro.append(f"Given parameters: {self.params}")
-            intro.append(f"Current local time: {time.strftime('%Y-%m-%d %H:%M:%S %A')}")
-            if self.base_flow_id:
-                base = self.store.get_flow(self.base_flow_id) or {}
-                intro.append(f"An existing similar flow was loaded as the starting draft (adapt it; keep steps that "
-                             f"still fit). Its metadata: name={base.get('name')!r}, intent="
-                             f"{base.get('intent_template')!r}, params={base.get('params_schema')}.\n"
-                             f"```python\n{self._source()}\n```\nYou still must call plan_flow and pass every step "
-                             f"with try_step in this session.")
-            res = agent.run("\n\n".join(intro), turn_limit=s.author.turn_limit)
-            if self.cancel.cancelled:
-                return tr.status("aborted", error="aborted by user")
-            if not res.done:
-                return tr.status("failed", error=f"author did not finish: {res.reason}")
-            out = self.d_runner.finish()
-            flow_obj, _ = load_flow(self.draft)
-            meta = flow_obj.meta()
-            tags = [f"derived_from:{self.base_flow_id}"] if self.base_flow_id else []
-            flow = self.store.create_flow(meta, self._source(), author="author",
-                                          reason="Author 录制: " + self.task["instruction"][:200], tags=tags)
-            self.store.update_run(self.run_id, flow_id=flow["id"], version=1, new_version=1,
-                                  params=self.params)
-            tr.flow_id = flow["id"]
-            tr.emit("version_created", self.store.get_version(flow["id"], 1, with_source=False) or {})
-            final = (res.final or {}).get("final_response", "")
-            run = tr.status("succeeded", output=out.get("output") or {})
-            return {**run, "final_response": final}
-        finally:
-            self.d_runner.close()
+                try:
+                    self.d_runner.load(self.draft, self.params if self.base_flow_id else {}, self.run_dir,
+                                       **self.d.runner_opts)
+                except RunnerError:
+                    self._write(render_flow_header("exploration"))
+                    self.d_runner.load(self.draft, {}, self.run_dir, **self.d.runner_opts)
+                shell = self.d.shell_factory()
+                ask_fn = None if effective_unattended else self.ask_user
+                tools = common_tools(self.d_runner, self.run_dir, shell, ask_user=ask_fn) + [
+                    Tool(tool_spec("plan_flow", "Declare/revise the flow: metadata, parameters (with example values "
+                                                "from this task), output schema and ordered steps.", PLAN_SCHEMA,
+                                   ["name", "params", "steps"]), self.plan_flow),
+                    Tool(tool_spec("try_step", "Add/replace a planned step (full @flow.step-decorated function source) "
+                                               "and run it now in the live session; commits it if it passes.",
+                                   {"source": {"type": "string"}}), self.try_step),
+                    Tool(tool_spec("remove_step", "Remove a step from the plan and the flow.",
+                                   {"step_id": {"type": "string"}}), self.remove),
+                    Tool(tool_spec("finish", "Finish when all planned steps passed and the task is accomplished.",
+                                   {"final_response": {"type": "string"}}), self.finish),
+                ]
+                agent = ToolAgent(self.d.llms.get("author"), load_prompt("author"), tools, role="author",
+                                  on_log=lambda k, t: tr.log("author", k, t), should_stop=lambda: self.cancel.cancelled)
+                intro = [f"# Task\n{self.task['instruction']}"]
+                if self.task.get("start_url"):
+                    intro.append(f"Start URL: {self.task['start_url']}")
+                if self.params:
+                    intro.append(f"Given parameters: {self.params}")
+                intro.append(f"Current local time: {time.strftime('%Y-%m-%d %H:%M:%S %A')}")
+                if self.base_flow_id:
+                    base = self.store.get_flow(self.base_flow_id) or {}
+                    intro.append(f"An existing similar flow was loaded as the starting draft (adapt it; keep steps that "
+                                 f"still fit). Its metadata: name={base.get('name')!r}, intent="
+                                 f"{base.get('intent_template')!r}, params={base.get('params_schema')}.\n"
+                                 f"```python\n{self._source()}\n```\nYou still must call plan_flow and pass every step "
+                                 f"with try_step in this session.")
+                res = agent.run("\n\n".join(intro), turn_limit=self._turn_limit or s.author.turn_limit)
+                if self.cancel.cancelled:
+                    return tr.status("aborted", error="aborted by user", usage=meter.snapshot())
+                if not res.done:
+                    return tr.status("failed", error=f"author did not finish: {res.reason}", usage=meter.snapshot())
+                out = self.d_runner.finish()
+                flow_obj, _ = load_flow(self.draft)
+                meta = flow_obj.meta()
+                tags = ([f"derived_from:{self.base_flow_id}"] if self.base_flow_id else []) + self._extra_tags
+                flow = self.store.create_flow(meta, self._source(), author="author",
+                                              reason="Author 录制: " + self.task["instruction"][:200], tags=tags)
+                self.store.update_run(self.run_id, flow_id=flow["id"], version=1, new_version=1,
+                                      params=self.params, usage=meter.snapshot())
+                tr.flow_id = flow["id"]
+                tr.emit("version_created", self.store.get_version(flow["id"], 1, with_source=False) or {})
+                final = (res.final or {}).get("final_response", "")
+                run = tr.status("succeeded", output=out.get("output") or {}, usage=meter.snapshot())
+                return {**run, "final_response": final, "params": self.params}
+            finally:
+                if owns_runner:
+                    self.d_runner.close()
 
 
 class Author:
@@ -236,8 +249,11 @@ class Author:
         self.d = deps
 
     def record(self, run_id: str, task: dict[str, Any], cancel: CancelToken | None = None,
-               base_flow_id: str | None = None, base_params: dict[str, Any] | None = None) -> dict[str, Any]:
-        sess = AuthorSession(self.d, run_id, task, cancel or CancelToken(), base_flow_id, base_params)
+               base_flow_id: str | None = None, base_params: dict[str, Any] | None = None,
+               *, runner: RunnerClient | None = None, turn_limit: int | None = None,
+               unattended: bool = False, extra_tags: list[str] | None = None) -> dict[str, Any]:
+        sess = AuthorSession(self.d, run_id, task, cancel or CancelToken(), base_flow_id, base_params,
+                             runner=runner, turn_limit=turn_limit, unattended=unattended, extra_tags=extra_tags)
         try:
             return sess.run()
         except Exception as exc:  # noqa: BLE001

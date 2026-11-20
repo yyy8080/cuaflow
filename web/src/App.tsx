@@ -7,6 +7,7 @@ import { FlowsPage } from './pages/FlowsPage';
 import { FlowDetailPage } from './pages/FlowDetailPage';
 import { RunsPage } from './pages/RunsPage';
 import { RunPage } from './pages/RunPage';
+import { SchedulesPage } from './pages/SchedulesPage';
 import { TicketsPage } from './pages/TicketsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { TICKETS_CHANGED } from './lib/bus';
@@ -74,10 +75,13 @@ export function App() {
         </div>
         <nav>
           <NavLink to="/" end>
-            <span className="nav-ico">✨</span>任务
+            <span className="nav-ico">✨</span>长任务
           </NavLink>
           <NavLink to="/flows">
             <span className="nav-ico">📚</span>脚本库
+          </NavLink>
+          <NavLink to="/schedules">
+            <span className="nav-ico">⏱️</span>持续监控
           </NavLink>
           <NavLink to="/runs">
             <span className="nav-ico">▶️</span>执行记录
@@ -99,6 +103,7 @@ export function App() {
           <Route path="/" element={<TasksPage />} />
           <Route path="/flows" element={<FlowsPage />} />
           <Route path="/flows/:id" element={<FlowDetailPage />} />
+          <Route path="/schedules" element={<SchedulesPage />} />
           <Route path="/runs" element={<RunsPage />} />
           <Route path="/runs/:id" element={<RunPage />} />
           <Route path="/tickets" element={<TicketsPage />} />

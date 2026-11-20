@@ -40,7 +40,7 @@ def _verdict(llm: LLM, messages: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def judge_step(llm: LLM, step: dict[str, Any], result: dict[str, Any], run_dir: Path,
-               intent: str = "") -> dict[str, Any]:
+               intent: str = "", extra_warnings: list[str] | None = None) -> dict[str, Any]:
     """Return {"passed": bool|None, "reason": str}. ``None`` means the judge could not decide."""
     obs = result.get("observation") or {}
     ctx_lines = [
@@ -49,6 +49,8 @@ def judge_step(llm: LLM, step: dict[str, Any], result: dict[str, Any], run_dir: 
         f"Expected outcome: {step.get('expect') or '(none given — infer from the title)'}",
         f"Step printed:\n{(result.get('stdout') or '').strip()[-2000:] or '(nothing)'}",
     ]
+    if extra_warnings:
+        ctx_lines.append("Runtime sentinel warnings:\n" + "\n".join(f"- {w}" for w in extra_warnings))
     if obs.get("url"):
         ctx_lines.append(f"Browser URL: {obs.get('url')}  title: {obs.get('title')}")
     if obs.get("foreground"):

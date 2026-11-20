@@ -22,6 +22,7 @@ export const REFETCH_TYPES: ReadonlySet<EventType> = new Set<EventType>([
   'run_status',
   'repair_end',
   'version_created',
+  'plan_updated',
 ]);
 
 export function runReducer(state: RunState, action: RunAction): RunState {
@@ -170,6 +171,9 @@ export function eventRole(ev: CuaEvent): string {
   switch (ev.type) {
     case 'agent_log':
       return ev.data?.role || 'agent';
+    case 'plan_updated':
+    case 'batch_progress':
+      return 'planner';
     case 'repair_log':
     case 'repair_start':
     case 'repair_end':

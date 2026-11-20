@@ -141,7 +141,7 @@ export function RunPage() {
           </Link>
           <h1 className="mono">{run.id}</h1>
           <StatusBadge status={run.status} />
-          <Badge tone="neutral">{run.kind === 'author' ? '录制' : '回放'}</Badge>
+          <Badge tone="neutral">{run.kind === 'author' ? '录制' : run.kind === 'mission' ? '长任务规划' : '回放'}</Badge>
           {run.flow_id && (
             <Link to={`/flows/${run.flow_id}${run.version != null ? `?v=${run.version}` : ''}`}>
               📄 {run.flow_id}
@@ -152,6 +152,12 @@ export function RunPage() {
             <Link to={`/flows/${run.flow_id}?v=${run.new_version}`}>
               <Badge tone="success">✨ 已生成新版本 v{run.new_version}</Badge>
             </Link>
+          )}
+          {run.usage && (
+            <Badge tone="info" title={`LLM 调用 ${run.usage.llm_calls} 次，脚本执行 ${run.usage.script_steps} 步`}>
+              ⚡ 消耗 {run.usage.total_tokens} tok
+              {run.usage.estimated_tokens_saved > 0 ? ` · 省 ~${run.usage.estimated_tokens_saved} tok` : ''}
+            </Badge>
           )}
           <span className="grow" />
           <span className={`ws-dot ws-${wsStatus}`} title={WS_LABEL[wsStatus]}>
@@ -231,7 +237,12 @@ function StepDetail({ runId, step, events }: { runId: string; step: StepRecord; 
   const live = step.status === 'running' || step.status === 'repairing';
   const dur = step.duration_ms ?? durationBetween(step.started_at, live ? undefined : step.ended_at);
   const repairLog = useMemo(
-    () => events.filter((e) => e.step_id === step.step_id && (e.type === 'repair_log' || (e.type === 'agent_log' && e.data?.role === 'repairer'))),
+    () =>
+      events.filter(
+        (e) =>
+          e.step_id === step.step_id &&
+          (e.type === 'repair_log' || (e.type === 'agent_log' && ['repairer', 'fallback'].includes(e.data?.role))),
+      ),
     [events, step.step_id],
   );
   return (

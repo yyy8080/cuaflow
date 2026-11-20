@@ -30,6 +30,11 @@ def open_search(c: Ctx):
 - `c.output` — dict; the final result of the flow (fill it in the last step(s)).
 - `c.browser.page()` — current Playwright page; `c.browser.new_page(url)`, `c.browser.pages()`,
   `c.browser.context()`, `c.browser.aria_snapshot()`.
+  - Stability & extraction helpers: `c.browser.wait_stable(page=None, timeout=10, idle_ms=250)`,
+    `c.browser.dismiss_overlays(page=None)` (safely closes cookie/consent overlays),
+    `c.browser.prune_tabs(keep_max=6)` (closes leaked background tabs),
+    `c.browser.extract_table(selector="table")` → `list[dict]`,
+    `c.browser.extract_links(selector="a[href]", limit=200)` → `[{"text", "href"}]`.
 - `c.desktop` — native desktop (Windows UIA via pywinauto):
   - `c.desktop.launch("notepad.exe")` → pid; `c.desktop.window(title_re=r".*记事本|.*Notepad", timeout=10)` → pywinauto
     `WindowSpecification` (UIA backend): `.child_window(title=..., control_type="Button", auto_id=...)`,

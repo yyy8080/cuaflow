@@ -358,6 +358,9 @@ class PersistentBrowser:
         self._pw: Any = None
         self._browser: Any = None
         self._active: Any = None
+        self._monitored_pages: set[int] = set()
+        self._auto_dialog: str | None = "accept"
+        self._telemetry: dict[str, Any] = self._empty_telemetry()
 
     # ------------------------------------------------------------------ lifecycle
     @classmethod
@@ -451,6 +454,8 @@ class PersistentBrowser:
             raise
         ctx = self.context()
         ctx.on("page", self._on_new_page)
+        for existing in self.pages():
+            self._attach_page_monitors(existing)
         return self
 
     def _adopt_from_profile(self) -> dict[str, Any] | None:
@@ -476,6 +481,7 @@ class PersistentBrowser:
 
     def _stop_playwright(self) -> None:
         pw, self._pw, self._browser, self._active = self._pw, None, None, None
+        self._monitored_pages.clear()
         if pw is not None:
             try:
                 pw.stop()
@@ -554,10 +560,117 @@ class PersistentBrowser:
         return [p for p in self.context().pages if not p.is_closed()]
 
     def _on_new_page(self, page: Any) -> None:
+        self._attach_page_monitors(page)
         self._active = page
+
+    @staticmethod
+    def _empty_telemetry() -> dict[str, Any]:
+        return {
+            "doc_status": None,
+            "doc_url": None,
+            "http_errors": [],
+            "network_failures": [],
+            "page_errors": [],
+            "console_errors": [],
+            "dialogs": [],
+        }
+
+    def reset_step_telemetry(self) -> None:
+        self._telemetry = self._empty_telemetry()
+
+    def drain_step_telemetry(self) -> dict[str, Any]:
+        snap = dict(self._telemetry)
+        try:
+            snap["open_tabs"] = len(self.pages()) if self.is_connected() else 0
+        except Exception:  # noqa: BLE001
+            snap["open_tabs"] = 0
+        self._telemetry = self._empty_telemetry()
+        return snap
+
+    def set_dialog_policy(self, policy: str | None) -> None:
+        """``"accept"`` (default), ``"dismiss"``, or ``None`` (leave dialogs to step code)."""
+        if policy not in ("accept", "dismiss", None):
+            raise ValueError(f"invalid dialog policy {policy!r}")
+        self._auto_dialog = policy
+
+    def _attach_page_monitors(self, page: Any) -> None:
+        pid = id(page)
+        if pid in self._monitored_pages:
+            return
+        self._monitored_pages.add(pid)
+
+        def on_console(msg: Any) -> None:
+            try:
+                if msg.type == "error":
+                    buf = self._telemetry["console_errors"]
+                    if len(buf) < 25:
+                        buf.append(str(msg.text)[:400])
+            except Exception:  # noqa: BLE001
+                pass
+
+        def on_pageerror(err: Any) -> None:
+            buf = self._telemetry["page_errors"]
+            if len(buf) < 25:
+                buf.append(str(err)[:500])
+
+        def on_requestfailed(req: Any) -> None:
+            try:
+                failure = req.failure or ""
+                if isinstance(failure, dict):
+                    failure = failure.get("errorText") or str(failure)
+                failure_s = str(failure)
+                if "ERR_ABORTED" in failure_s or "NS_BINDING_ABORTED" in failure_s:
+                    return
+                buf = self._telemetry["network_failures"]
+                if len(buf) < 25:
+                    buf.append({"url": str(req.url)[:300], "resource_type": str(req.resource_type), "failure": failure_s[:200]})
+            except Exception:  # noqa: BLE001
+                pass
+
+        def on_response(resp: Any) -> None:
+            try:
+                status = int(resp.status)
+                rtype = str(resp.request.resource_type)
+                is_main_doc = rtype == "document" and resp.frame == page.main_frame
+                if is_main_doc:
+                    self._telemetry["doc_status"] = status
+                    self._telemetry["doc_url"] = str(resp.url)[:400]
+                if status >= 400 and rtype in ("document", "xhr", "fetch"):
+                    buf = self._telemetry["http_errors"]
+                    if len(buf) < 25:
+                        buf.append({"status": status, "url": str(resp.url)[:300], "resource_type": rtype, "main_frame": is_main_doc})
+            except Exception:  # noqa: BLE001
+                pass
+
+        def on_dialog(dialog: Any) -> None:
+            entry = {"type": "", "message": "", "handled": False}
+            try:
+                entry["type"] = str(dialog.type)
+                entry["message"] = str(dialog.message)[:400]
+                if self._auto_dialog == "accept":
+                    dialog.accept()
+                    entry["handled"] = True
+                elif self._auto_dialog == "dismiss":
+                    dialog.dismiss()
+                    entry["handled"] = True
+            except Exception:  # noqa: BLE001 - already handled by step code
+                pass
+            buf = self._telemetry["dialogs"]
+            if len(buf) < 20:
+                buf.append(entry)
+
+        try:
+            page.on("console", on_console)
+            page.on("pageerror", on_pageerror)
+            page.on("requestfailed", on_requestfailed)
+            page.on("response", on_response)
+            page.on("dialog", on_dialog)
+        except Exception:  # noqa: BLE001
+            pass
 
     def set_active(self, page: Any) -> Any:
         """Mark ``page`` as the one :meth:`page` returns (also brings it to front)."""
+        self._attach_page_monitors(page)
         self._active = page
         try:
             page.bring_to_front()
@@ -568,6 +681,7 @@ class PersistentBrowser:
     def page(self) -> Any:
         """Most recently active non-closed page of the default context (creates one if none)."""
         if self._active is not None and not self._active.is_closed():
+            self._attach_page_monitors(self._active)
             return self._active
         pages = self.pages()
         if not pages:
@@ -588,6 +702,7 @@ class PersistentBrowser:
                 except Exception:  # noqa: BLE001
                     continue
         self._active = chosen or pages[-1]
+        self._attach_page_monitors(self._active)
         return self._active
 
     def new_page(self, url: str | None = None) -> Any:
@@ -625,6 +740,209 @@ class PersistentBrowser:
                 write_session(self.session_file, current)
         except Exception:  # noqa: BLE001
             pass
+
+    # ------------------------------------------------------------------ long-run hygiene & helpers
+    def prune_tabs(self, keep_max: int = 6) -> int:
+        """Close excess background/blank tabs so long-horizon runs do not leak memory."""
+        if not self.is_connected():
+            return 0
+        pages = self.pages()
+        if len(pages) <= max(1, keep_max):
+            return 0
+        active = self.page()
+        closed = 0
+        # First close background about:blank tabs, then oldest non-active tabs.
+        candidates = [p for p in pages if p is not active and p.url in ("about:blank", "")] + [
+            p for p in pages if p is not active and p.url not in ("about:blank", "")
+        ]
+        for p in candidates:
+            if len(pages) - closed <= max(1, keep_max):
+                break
+            try:
+                p.close()
+                closed += 1
+            except Exception:  # noqa: BLE001
+                pass
+        return closed
+
+    def wait_stable(self, page: Any | None = None, timeout: float = 10.0, idle_ms: int = 250) -> None:
+        """Wait for DOM readiness + brief network/layout settle without hanging on long-polling."""
+        p = page or self.page()
+        try:
+            p.wait_for_load_state("domcontentloaded", timeout=int(timeout * 1000))
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            p.wait_for_load_state("networkidle", timeout=int(min(timeout, 2.0) * 1000))
+        except Exception:  # noqa: BLE001
+            pass
+        if idle_ms > 0:
+            time.sleep(idle_ms / 1000.0)
+
+    def dismiss_overlays(self, page: Any | None = None) -> list[str]:
+        """Safely dismiss common cookie banners or closeable modal overlays (never touches CAPTCHAs)."""
+        p = page or self.page()
+        health = self.page_health(p)
+        if health.get("captcha_detected"):
+            return []
+        dismissed: list[str] = []
+        script = """() => {
+            const clicked = [];
+            const bannerRe = /cookie|consent|gdpr|privacy|banner|modal|overlay|popup|toast/i;
+            const acceptLabels = ['接受', '全部接受', '同意', '我知道了', '知道了', '关闭', 'Accept', 'Accept all', 'Accept All', 'I agree', 'Got it'];
+            const candidates = Array.from(document.querySelectorAll('button, [role="button"]'));
+            for (const btn of candidates) {
+                const rect = btn.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) continue;
+                const style = window.getComputedStyle(btn);
+                if (style.visibility === 'hidden' || style.display === 'none') continue;
+                const label = (btn.innerText || btn.getAttribute('aria-label') || '').trim();
+                if (!acceptLabels.includes(label)) continue;
+                let anc = btn.parentElement;
+                let inOverlay = false;
+                for (let d = 0; anc && d < 6; d++, anc = anc.parentElement) {
+                    const cls = `${anc.id || ''} ${anc.className || ''} ${anc.getAttribute('role') || ''} ${anc.getAttribute('aria-modal') || ''}`;
+                    const pos = window.getComputedStyle(anc).position;
+                    if (bannerRe.test(cls) || pos === 'fixed' || anc.getAttribute('role') === 'dialog') {
+                        inOverlay = true;
+                        break;
+                    }
+                }
+                if (inOverlay) {
+                    btn.click();
+                    clicked.push(label);
+                    if (clicked.length >= 2) break;
+                }
+            }
+            return clicked;
+        }"""
+        try:
+            res = p.evaluate(script)
+            if isinstance(res, list):
+                dismissed.extend(str(x) for x in res)
+        except Exception:  # noqa: BLE001
+            pass
+        return dismissed
+
+    def extract_table(self, selector: str = "table", page: Any | None = None, max_rows: int = 500) -> list[dict[str, str]]:
+        """Extract an HTML table into a list of row dicts keyed by header names."""
+        p = page or self.page()
+        js = """([sel, limit]) => {
+            const tbl = document.querySelector(sel);
+            if (!tbl) return [];
+            const ths = Array.from(tbl.querySelectorAll('thead th, tr:first-child th')).map(
+                (el, i) => (el.innerText || '').trim() || `col_${i}`
+            );
+            const bodyRows = tbl.querySelectorAll('tbody tr').length
+                ? Array.from(tbl.querySelectorAll('tbody tr'))
+                : Array.from(tbl.querySelectorAll('tr')).slice(ths.length ? 1 : 0);
+            const out = [];
+            for (const tr of bodyRows.slice(0, limit)) {
+                const cells = Array.from(tr.querySelectorAll('td, th')).map(c => (c.innerText || '').trim());
+                if (!cells.length) continue;
+                const row = {};
+                cells.forEach((v, i) => { row[ths[i] || `col_${i}`] = v; });
+                out.push(row);
+            }
+            return out;
+        }"""
+        res = p.evaluate(js, [selector, int(max_rows)])
+        return res if isinstance(res, list) else []
+
+    def extract_links(self, selector: str = "a[href]", page: Any | None = None, limit: int = 200) -> list[dict[str, str]]:
+        """Extract visible/matching anchor links with resolved absolute URLs."""
+        p = page or self.page()
+        js = """([sel, lim]) => Array.from(document.querySelectorAll(sel)).slice(0, lim).map(a => ({
+            text: (a.innerText || a.getAttribute('aria-label') || '').trim(),
+            href: a.href || a.getAttribute('href') || ''
+        })).filter(x => x.href)"""
+        res = p.evaluate(js, [selector, int(limit)])
+        return res if isinstance(res, list) else []
+
+    def page_health(self, page: Any | None = None) -> dict[str, Any]:
+        """Zero-token DOM health & safety probe (error pages, alerts, login walls, passive CAPTCHA check)."""
+        p = page or self.page()
+        url = ""
+        try:
+            url = str(p.url or "")
+        except Exception:  # noqa: BLE001
+            pass
+        if url.startswith("chrome-error://") or url.startswith("edge-error://"):
+            return {
+                "url": url,
+                "is_error_page": True,
+                "error_reason": "browser_network_error_page",
+                "captcha_detected": False,
+                "login_wall_detected": False,
+                "body_text_len": 0,
+                "alerts": [],
+                "dom_fingerprint": f"err:{url}",
+            }
+        js = """() => {
+            const visible = (el) => {
+                if (!el) return false;
+                const r = el.getBoundingClientRect();
+                if (r.width <= 2 || r.height <= 2) return false;
+                const s = window.getComputedStyle(el);
+                return s.visibility !== 'hidden' && s.display !== 'none';
+            };
+            const title = document.title || '';
+            const bodyText = (document.body ? (document.body.innerText || '') : '').trim();
+            // Passive CAPTCHA / anti-bot gate detection ONLY so the supervisor can stop & escalate safely.
+            const iframes = Array.from(document.querySelectorAll('iframe')).filter(visible);
+            const captchaFrame = iframes.some(f => {
+                const src = (f.src || '').toLowerCase();
+                return src.includes('recaptcha/api2/bframe') || src.includes('recaptcha/enterprise/bframe')
+                    || src.includes('hcaptcha.com') || src.includes('challenges.cloudflare.com');
+            });
+            const cfChallenge = Boolean(
+                document.querySelector('#challenge-running, #cf-challenge-running, form#challenge-form')
+                || (title === 'Just a moment...' && document.querySelector('[name="cf-turnstile-response"]'))
+            );
+            const hasVisibleCaptchaBox = Array.from(
+                document.querySelectorAll('.cf-turnstile, .h-captcha, #captcha-box, [data-sitekey]')
+            ).some(el => visible(el) && /verify you are human|完成人机验证|请完成安全验证/i.test(bodyText));
+
+            const pwVisible = Array.from(document.querySelectorAll('input[type="password"]')).some(visible);
+            const path = (location.pathname + location.search).toLowerCase();
+            const loginUrl = /(^|\\/|\\b)(login|signin|sign-in|sso|auth)(\\/|\\b|\\?|$)/.test(path);
+
+            const alerts = Array.from(document.querySelectorAll('[role="alert"], .alert-danger, .toast-error, .error-banner'))
+                .filter(visible)
+                .map(el => (el.innerText || '').trim().slice(0, 200))
+                .filter(Boolean)
+                .slice(0, 5);
+
+            const headings = Array.from(document.querySelectorAll('h1, h2, h3, button, [role="alert"]'))
+                .slice(0, 20)
+                .map(e => (e.innerText || '').trim().slice(0, 40))
+                .join('|');
+            let hash = 5381;
+            const sig = `${location.href}::${title}::${bodyText.length}::${headings}`;
+            for (let i = 0; i < sig.length; i++) {
+                hash = ((hash << 5) + hash + sig.charCodeAt(i)) >>> 0;
+            }
+            const netErr = Boolean(document.querySelector('#main-frame-error, .neterror'));
+            return {
+                url: location.href,
+                title,
+                ready_state: document.readyState,
+                body_text_len: bodyText.length,
+                is_error_page: netErr,
+                captcha_detected: Boolean(captchaFrame || cfChallenge || hasVisibleCaptchaBox),
+                login_wall_detected: Boolean(pwVisible && loginUrl),
+                alerts,
+                dom_fingerprint: hash.toString(16),
+            };
+        }"""
+        try:
+            res = p.evaluate(js)
+            if isinstance(res, dict):
+                return res
+        except Exception as exc:  # noqa: BLE001
+            return {"url": url, "probe_error": str(exc)[:200], "is_error_page": False,
+                    "captcha_detected": False, "login_wall_detected": False, "alerts": []}
+        return {"url": url, "is_error_page": False, "captcha_detected": False, "login_wall_detected": False, "alerts": []}
 
     # ------------------------------------------------------------------ observation
     def aria_snapshot(self, page: Any | None = None, max_chars: int = 12000) -> str:

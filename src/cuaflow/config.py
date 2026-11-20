@@ -35,11 +35,18 @@ class ModelsConfig(BaseModel):
 
 
 class SupervisorConfig(BaseModel):
+    l15_sentinel: bool = True
     l2_policy: Literal["always", "on_change", "sample", "off"] = "on_change"
+    adaptive_l2: bool = True
+    audit_every_n_runs: int = 10
     sample_rate: float = 0.2
     l3_enabled: bool = True
+    tier0_heal: bool = True
     max_repair_attempts: int = 3
     repair_turn_limit: int = 30
+    autonomous_fallback: bool = True
+    fallback_turn_limit: int = 25
+    unattended: bool = False
     auto_rollback: bool = False
     rollback_after_failures: int = 3
     step_timeout_default: float = 120
@@ -52,7 +59,17 @@ class SafetyConfig(BaseModel):
 
 class AuthorConfig(BaseModel):
     turn_limit: int = 80
-    verify_replay: bool = True
+    verify_replay: bool = False
+
+
+class PlannerConfig(BaseModel):
+    enabled: bool = True
+    turn_limit: int = 60
+    sub_author_turn_limit: int = 50
+    max_batch_items: int = 200
+    tab_limit: int = 6
+    tokens_saved_per_step: int = 1800
+    auto_resume: bool = False
 
 
 class Settings(BaseModel):
@@ -60,6 +77,7 @@ class Settings(BaseModel):
     supervisor: SupervisorConfig = Field(default_factory=SupervisorConfig)
     safety: SafetyConfig = Field(default_factory=SafetyConfig)
     author: AuthorConfig = Field(default_factory=AuthorConfig)
+    planner: PlannerConfig = Field(default_factory=PlannerConfig)
 
 
 _lock = threading.Lock()

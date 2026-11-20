@@ -137,6 +137,12 @@ class RunnerClient:
     def check_pre(self, step_id: str) -> dict[str, Any]:
         return self.call("check_pre", timeout=60, step_id=step_id)
 
+    def heal_browser(self, keep_tabs: int = 6) -> dict[str, Any]:
+        return self.call("heal_browser", timeout=30, keep_tabs=keep_tabs)
+
+    def update_output(self, updates: dict[str, Any]) -> dict[str, Any]:
+        return self.call("update_output", timeout=15, updates=updates)
+
     def finish(self) -> dict[str, Any]:
         return self.call("finish", timeout=30)
 

@@ -1,25 +1,36 @@
-"""Match a new task against the flow library: run an existing flow, adapt one, or record a new one.
-
-Condensed from upstream Skill Factory ``retrieve`` / ``decide`` / ``fill`` into one LLM call
-plus deterministic validation.
-"""
+"""Match a new task against the flow library: run an existing flow, adapt one, launch a multi-phase mission, or record a new flow."""
 
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from cuaflow.llm.base import LLM, LLMError, parse_json_loose
 
 MATCH_SYSTEM = """You route automation tasks to a library of recorded, parameterized flows.
 Given the new task and the catalog, answer with ONE JSON object:
-{"verdict": "run" | "adapt" | "new", "flow_id": "<id or null>", "params": {<param>: <value>}, "reason": "<short>"}
-- "run": the task is exactly the procedure of an existing flow, only parameter values differ, and EVERY parameter
-  of that flow can be filled from the task (use the flow's param names and types; convert dates/numbers to the
-  format implied by the description/example).
-- "adapt": same application/site and a similar procedure, but steps or parameters need changes.
-- "new": nothing relevant.
-Prefer "adapt" over a wrong "run". Never invent parameter values that are not stated or clearly implied."""
+{"verdict": "run" | "adapt" | "mission" | "new", "flow_id": "<id or null>", "params": {<param>: <value>}, "reason": "<short>"}
+- "run": the task is a single execution of an existing flow, only parameter values differ, and EVERY required parameter
+  of that flow can be filled from the task (convert dates/numbers to the format implied by description/example).
+- "adapt": same application/site and a single linear procedure, but steps or parameters need changes.
+- "mission": the task is long-horizon, multi-stage, chains multiple flows, or iterates over multiple items/pages/queries.
+- "new": a single linear procedure with nothing relevant in the catalog.
+Prefer "adapt" or "mission" over a wrong "run". Never invent parameter values that are not stated or clearly implied."""
+
+_LONG_HORIZON_PATTERNS = re.compile(
+    r"(逐个|逐条|依次|批量|遍历|翻页|每一页|所有页|全部页|每个|每一项|前\s*\d+\s*(个|条|页|项|篇|家)|"
+    r"\bfor\s+each\b|\beach\s+of\b|\ball\s+\d+\b|\bevery\s+page\b|\bpaginate\b|\bpagination\b|\bbatch\b)",
+    re.IGNORECASE,
+)
+
+
+def looks_long_horizon(instruction: str) -> bool:
+    """Fast heuristic detecting batch/loop/pagination/multi-stage instructions."""
+    text = (instruction or "").strip()
+    if len(text) >= 260:
+        return True
+    return bool(_LONG_HORIZON_PATTERNS.search(text))
 
 
 def _catalog(flows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -43,7 +54,8 @@ def match_task(llm: LLM | None, flows: list[dict[str, Any]], instruction: str, s
                params: dict[str, Any] | None = None) -> dict[str, Any]:
     params = dict(params or {})
     if not flows or llm is None:
-        return {"verdict": "new", "flow_id": None, "params": params, "reason": "library is empty"}
+        verdict = "mission" if looks_long_horizon(instruction) else "new"
+        return {"verdict": verdict, "flow_id": None, "params": params, "reason": "library is empty"}
     user = json.dumps({"task": instruction, "start_url": start_url, "given_params": params,
                        "catalog": _catalog(flows)}, ensure_ascii=False, indent=1)
     try:
@@ -53,6 +65,9 @@ def match_task(llm: LLM | None, flows: list[dict[str, Any]], instruction: str, s
     except (LLMError, ValueError, json.JSONDecodeError) as exc:
         return {"verdict": "new", "flow_id": None, "params": params, "reason": f"matcher unavailable: {exc}"}
     verdict = obj.get("verdict") if isinstance(obj, dict) else None
+    if verdict == "mission":
+        return {"verdict": "mission", "flow_id": obj.get("flow_id"), "params": {**(obj.get("params") or {}), **params},
+                "reason": obj.get("reason", "long-horizon mission")}
     by_id = {f["id"]: f for f in flows}
     flow_id = obj.get("flow_id") if isinstance(obj, dict) else None
     if verdict not in ("run", "adapt") or flow_id not in by_id:

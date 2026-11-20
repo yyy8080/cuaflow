@@ -14,6 +14,7 @@ export const RUN_STATUS_LABEL: Record<RunStatus, string> = {
 export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
   queued: '排队中',
   matching: '匹配脚本',
+  planning: '自主规划执行',
   authoring: '录制中',
   running: '运行中',
   succeeded: '成功',
@@ -31,9 +32,17 @@ export const STEP_STATUS_LABEL: Record<StepStatus, string> = {
   skipped: '已跳过',
 };
 
+export const SCHEDULE_STATUS_LABEL: Record<string, string> = {
+  active: '监控中',
+  paused: '已暂停',
+  tripped: '已熔断',
+  completed: '已完成',
+};
+
 export const VERDICT_LABEL: Record<string, string> = {
   run: '直接复用',
   adapt: '改参复用',
+  mission: '长任务规划',
   new: '新录制',
 };
 
@@ -44,9 +53,11 @@ export const AUTHOR_LABEL: Record<string, string> = {
 };
 
 export const ROLE_LABEL: Record<string, string> = {
+  planner: '规划者',
   author: '录制者',
   supervisor: '监督者',
   repairer: '修复者',
+  fallback: '自主接管',
   vision_judge: '视觉裁判',
   system: '系统',
   agent: '智能体',
@@ -60,11 +71,15 @@ export function statusTone(s: string | undefined): Tone {
     case 'passed':
     case 'repaired':
     case 'resolved':
+    case 'active':
+    case 'done':
       return 'success';
     case 'failed':
+    case 'tripped':
       return 'danger';
     case 'running':
     case 'matching':
+    case 'planning':
     case 'authoring':
       return 'info';
     case 'repairing':
@@ -73,6 +88,8 @@ export function statusTone(s: string | undefined): Tone {
       return 'warning';
     case 'aborted':
     case 'skipped':
+    case 'paused':
+    case 'completed':
       return 'muted';
     default:
       return 'neutral';
@@ -80,6 +97,13 @@ export function statusTone(s: string | undefined): Tone {
 }
 
 export const TERMINAL_RUN: ReadonlySet<string> = new Set(['succeeded', 'failed', 'aborted']);
+
+export function fmtTokens(n?: number): string {
+  if (n === undefined || n === null || isNaN(n)) return '0';
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(Math.round(n));
+}
 
 export function fmtTime(iso?: string): string {
   if (!iso) return '–';

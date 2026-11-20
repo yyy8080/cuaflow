@@ -8,6 +8,34 @@ export type StepSpec = { id: string; title: string; expect?: string; side_effect
 export type RunStatus = 'queued' | 'running' | 'repairing' | 'waiting_human' | 'succeeded' | 'failed' | 'aborted';
 export type StepStatus = 'pending' | 'running' | 'passed' | 'failed' | 'repairing' | 'repaired' | 'skipped';
 
+export type UsageSnapshot = {
+  llm_calls: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  script_steps: number;
+  estimated_tokens_saved: number;
+  savings_ratio: number;
+  by_role?: Record<string, { calls: number; tokens: number }>;
+};
+
+export type GlobalStats = {
+  flows: number;
+  auto_repairs: number;
+  flow_runs: number;
+  flow_successes: number;
+  flow_success_rate: number;
+  tasks: number;
+  tasks_succeeded: number;
+  llm_calls: number;
+  total_tokens: number;
+  script_steps: number;
+  estimated_tokens_saved: number;
+  savings_ratio: number;
+  schedules_active: number;
+  schedules_tripped: number;
+};
+
 export type Flow = {
   id: string;
   name: string;
@@ -20,7 +48,15 @@ export type Flow = {
   created_at: string;
   updated_at: string;
   tags: string[];
-  stats: { runs: number; successes: number; repairs: number; last_run_at?: string; last_status?: RunStatus };
+  stats: {
+    runs: number;
+    successes: number;
+    repairs: number;
+    last_run_at?: string;
+    last_status?: RunStatus;
+    script_steps?: number;
+    estimated_tokens_saved?: number;
+  };
 };
 
 export type Version = {
@@ -39,7 +75,7 @@ export type Version = {
 
 export type FlowDetail = Flow & { versions: Version[] };
 
-export type Check = { level: 'L0' | 'L1' | 'L2' | 'L3'; passed: boolean; detail: string; ts: string };
+export type Check = { level: 'L0' | 'L1' | 'L1.5' | 'L2' | 'L3'; passed: boolean; detail: string; ts: string };
 
 export type Repair = {
   attempt: number;
@@ -70,7 +106,7 @@ export type StepRecord = {
 
 export type Run = {
   id: string;
-  kind: 'flow' | 'author';
+  kind: 'flow' | 'author' | 'mission';
   flow_id?: string;
   version?: number;
   task_id?: string;
@@ -84,19 +120,68 @@ export type Run = {
   steps: StepRecord[];
   new_version?: number;
   final_verdict?: { passed: boolean; detail: string };
+  usage?: UsageSnapshot;
 };
 
-export type TaskStatus = 'queued' | 'matching' | 'authoring' | 'running' | 'succeeded' | 'failed' | 'aborted';
+export type TaskMode = 'auto' | 'mission' | 'single';
+export type TaskStatus = 'queued' | 'matching' | 'planning' | 'authoring' | 'running' | 'succeeded' | 'failed' | 'aborted';
+
+export type PlanPhase = {
+  id: string;
+  title: string;
+  kind?: 'explore' | 'skill' | 'batch' | 'synthesize';
+  status?: 'pending' | 'running' | 'done' | 'skipped' | 'failed';
+  note?: string;
+};
+
+export type MissionPlan = {
+  goal?: string;
+  phases: PlanPhase[];
+};
+
 export type Task = {
   id: string;
   instruction: string;
   start_url?: string;
   params: Record<string, any>;
+  mode?: TaskMode;
   status: TaskStatus;
-  match?: { verdict: 'run' | 'adapt' | 'new'; flow_id?: string; params?: Record<string, any>; reason?: string };
+  match?: { verdict: 'run' | 'adapt' | 'mission' | 'new'; flow_id?: string; params?: Record<string, any>; reason?: string };
   run_id?: string;
   flow_id?: string;
   final_response?: string;
+  plan?: MissionPlan;
+  checkpoint?: {
+    updated_at?: string;
+    batches?: Record<string, { flow_id?: string; completed_count: number; total: number }>;
+  };
+  usage?: UsageSnapshot;
+  sub_runs?: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type ScheduleStatus = 'active' | 'paused' | 'tripped' | 'completed';
+export type Schedule = {
+  id: string;
+  name: string;
+  kind: 'flow' | 'task';
+  flow_id?: string;
+  instruction?: string;
+  start_url?: string;
+  params: Record<string, any>;
+  interval_seconds: number;
+  max_runs?: number;
+  enabled: boolean;
+  max_consecutive_failures: number;
+  runs_count: number;
+  success_count: number;
+  consecutive_failures: number;
+  last_run_id?: string;
+  last_run_at?: string;
+  last_status?: string;
+  next_run_at?: string;
+  status: ScheduleStatus;
   created_at: string;
   updated_at: string;
 };
@@ -116,25 +201,41 @@ export type Ticket = {
 };
 
 export type ModelSpec = { base_url: string; model: string; api_key_env: string; vision?: boolean; max_output_tokens?: number };
-export type ModelRole = 'author' | 'supervisor' | 'repairer' | 'vision_judge';
-export const MODEL_ROLES: ModelRole[] = ['author', 'supervisor', 'repairer', 'vision_judge'];
+export type ModelRole = 'planner' | 'author' | 'supervisor' | 'repairer' | 'fallback' | 'vision_judge';
+export const MODEL_ROLES: ModelRole[] = ['planner', 'author', 'supervisor', 'repairer', 'fallback', 'vision_judge'];
 
 export type L2Policy = 'always' | 'on_change' | 'sample' | 'off';
 export type Settings = {
   models: { default: ModelSpec; roles: Partial<Record<ModelRole, ModelSpec>> };
   supervisor: {
+    l15_sentinel?: boolean;
     l2_policy: L2Policy;
+    adaptive_l2?: boolean;
+    audit_every_n_runs?: number;
     sample_rate: number;
     l3_enabled: boolean;
+    tier0_heal?: boolean;
     max_repair_attempts: number;
+    autonomous_fallback?: boolean;
+    unattended?: boolean;
     auto_rollback: boolean;
     rollback_after_failures: number;
   };
   safety: { blocked_patterns: string[]; confirm_side_effects: boolean };
+  author?: { turn_limit?: number; verify_replay?: boolean };
+  planner?: {
+    enabled?: boolean;
+    turn_limit?: number;
+    max_batch_items?: number;
+    tab_limit?: number;
+    auto_resume?: boolean;
+  };
 };
 
 export type EventType =
   | 'task_status'
+  | 'plan_updated'
+  | 'batch_progress'
   | 'run_status'
   | 'step_start'
   | 'step_end'
@@ -146,6 +247,8 @@ export type EventType =
   | 'ticket_open'
   | 'ticket_resolved'
   | 'version_created'
+  | 'schedule_run'
+  | 'schedule_tripped'
   | 'log';
 
 export type CuaEvent = {
@@ -248,6 +351,7 @@ export function wsUrl(): string {
 
 export const api = {
   health: () => request<{ ok: boolean; version: string; platform: string }>('GET', '/api/health'),
+  stats: () => request<GlobalStats>('GET', '/api/stats'),
 
   listFlows: () => request<Flow[]>('GET', '/api/flows'),
   getFlow: (id: string) => request<FlowDetail>('GET', `/api/flows/${enc(id)}`),
@@ -257,10 +361,38 @@ export const api = {
   rollback: (id: string, version: number) => request<Flow>('POST', `/api/flows/${enc(id)}/rollback`, { version }),
   deleteFlow: (id: string) => request<{ ok: boolean }>('DELETE', `/api/flows/${enc(id)}`),
 
-  createTask: (body: { instruction: string; start_url?: string; params?: Record<string, any>; force_new?: boolean }) =>
-    request<Task>('POST', '/api/tasks', body),
+  createTask: (body: {
+    instruction: string;
+    start_url?: string;
+    params?: Record<string, any>;
+    force_new?: boolean;
+    mode?: TaskMode;
+  }) => request<Task>('POST', '/api/tasks', body),
   listTasks: () => request<Task[]>('GET', '/api/tasks'),
   getTask: (id: string) => request<Task>('GET', `/api/tasks/${enc(id)}`),
+  resumeTask: (id: string) => request<Task>('POST', `/api/tasks/${enc(id)}/resume`),
+  abortTask: (id: string) => request<Task>('POST', `/api/tasks/${enc(id)}/abort`),
+
+  listSchedules: () => request<Schedule[]>('GET', '/api/schedules'),
+  createSchedule: (body: {
+    name: string;
+    interval_seconds: number;
+    kind: 'flow' | 'task';
+    flow_id?: string;
+    instruction?: string;
+    start_url?: string;
+    params?: Record<string, any>;
+    max_runs?: number;
+    max_consecutive_failures?: number;
+    enabled?: boolean;
+    run_immediately?: boolean;
+  }) => request<Schedule>('POST', '/api/schedules', body),
+  patchSchedule: (
+    id: string,
+    body: { enabled?: boolean; interval_seconds?: number; max_consecutive_failures?: number; reset_breaker?: boolean },
+  ) => request<Schedule>('PATCH', `/api/schedules/${enc(id)}`, body),
+  triggerSchedule: (id: string) => request<{ ok: boolean; schedule: Schedule }>('POST', `/api/schedules/${enc(id)}/trigger`),
+  deleteSchedule: (id: string) => request<{ ok: boolean }>('DELETE', `/api/schedules/${enc(id)}`),
 
   listRuns: (opts: { flow_id?: string; limit?: number } = {}) => request<Run[]>('GET', `/api/runs${qs(opts)}`),
   getRun: (id: string) => request<Run>('GET', `/api/runs/${enc(id)}`),

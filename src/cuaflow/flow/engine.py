@@ -87,6 +87,9 @@ class FlowEngine:
         c.current_step = step_id
         c.surfaces_used = set()
         before_modals = self._modal_titles()
+        pre_br = c.peek_browser()
+        if pre_br is not None and hasattr(pre_br, "reset_step_telemetry"):
+            pre_br.reset_step_telemetry()
         buf = io.StringIO()
         started = now_iso()
         t0 = time.monotonic()
@@ -104,6 +107,8 @@ class FlowEngine:
             except Exception as exc:  # noqa: BLE001
                 status, error_kind, error, tb = "failed", "exception", f"{type(exc).__name__}: {exc}", _short_tb(exc)
         duration_ms = int((time.monotonic() - t0) * 1000)
+        post_br = c.peek_browser()
+        step_tel = post_br.drain_step_telemetry() if (post_br is not None and hasattr(post_br, "drain_step_telemetry")) else None
         result: dict[str, Any] = {
             "step_id": step_id,
             "index": self.flow.index(step_id),
@@ -125,6 +130,8 @@ class FlowEngine:
             obs = self.observation(surface=self._surface_for(step), tag=f"{status}")
             after_modals = obs.get("modal_dialogs", [])
             obs["new_modal_dialogs"] = [t for t in after_modals if t not in before_modals]
+            if step_tel is not None:
+                obs["browser_telemetry"] = step_tel
             result["observation"] = obs
             result["screenshot"] = obs.get("screenshot")
         result["state"] = c.state_json()
@@ -153,6 +160,8 @@ class FlowEngine:
                     max_chars: int = 12000) -> dict[str, Any]:
         """Screenshot + lightweight context; with ``detail`` also ARIA / UIA tree text."""
         c = self.ctx
+        if detail and not c.has_browser():
+            c.attach_live_browser()
         obs: dict[str, Any] = {"ts": now_iso()}
         surface = surface or ("browser" if c.has_browser() else "desktop")
         obs["surface"] = surface
@@ -167,6 +176,8 @@ class FlowEngine:
             try:
                 page = browser.page()
                 obs["url"], obs["title"] = page.url, page.title()
+                if hasattr(browser, "page_health"):
+                    obs["page_health"] = browser.page_health(page)
                 if detail:
                     obs["aria"] = browser.aria_snapshot(page, max_chars=max_chars)
             except Exception as exc:  # noqa: BLE001
@@ -181,6 +192,36 @@ class FlowEngine:
         except Exception as exc:  # noqa: BLE001
             obs["desktop_error"] = f"{type(exc).__name__}: {exc}"
         return obs
+
+    def heal_browser(self, keep_tabs: int = 6) -> dict[str, Any]:
+        """Zero-token deterministic browser recovery: reconnect CDP, prune leaked tabs, dismiss safe overlays."""
+        c = self.ctx
+        info: dict[str, Any] = {"used_browser": False, "reconnected": False, "tabs_closed": 0, "dismissed": []}
+        if not c.has_browser() and self._browser_touched():
+            try:
+                _ = c.browser
+                info["reconnected"] = True
+            except Exception as exc:  # noqa: BLE001
+                info["error"] = f"{type(exc).__name__}: {exc}"
+                return info
+        br = c.peek_browser()
+        if br is None:
+            return info
+        info["used_browser"] = True
+        try:
+            if hasattr(br, "prune_tabs"):
+                info["tabs_closed"] = br.prune_tabs(keep_max=keep_tabs)
+            if hasattr(br, "wait_stable"):
+                br.wait_stable(timeout=3.0, idle_ms=150)
+            if hasattr(br, "dismiss_overlays"):
+                info["dismissed"] = br.dismiss_overlays()
+            info["url"] = br.page().url
+        except Exception as exc:  # noqa: BLE001
+            info["error"] = f"{type(exc).__name__}: {exc}"
+        return info
+
+    def _browser_touched(self) -> bool:
+        return bool(self.ctx._browser is not None or self.ctx.last_surface == "browser" or self.flow.start_url)
 
     # ------------------------------------------------------------------
     def replace_step(self, step_source: str, expected_id: str | None = None) -> dict[str, Any]:
@@ -202,6 +243,10 @@ class FlowEngine:
 
     def set_state(self, state: dict[str, Any]) -> None:
         self.ctx.state = dict(state)
+
+    def update_output(self, updates: dict[str, Any]) -> dict[str, Any]:
+        self.ctx.output.update(updates or {})
+        return json.loads(json.dumps(self.ctx.output, default=str, ensure_ascii=False))
 
     def finish(self) -> dict[str, Any]:
         return {"output": json.loads(json.dumps(self.ctx.output, default=str, ensure_ascii=False)),

@@ -17,6 +17,18 @@ def default_browser_factory() -> BrowserBackend:
     return PersistentBrowser.connect()
 
 
+def default_browser_probe() -> BrowserBackend | None:
+    from cuaflow.platform.browser import BrowserNotRunning, PersistentBrowser
+
+    st = PersistentBrowser.status()
+    if not st.get("alive"):
+        return None
+    try:
+        return PersistentBrowser.connect(launch_if_missing=False)
+    except BrowserNotRunning:
+        return None
+
+
 def default_desktop_factory() -> DesktopBackend:
     from cuaflow.platform.base import default_desktop
 
@@ -38,6 +50,7 @@ class Ctx:
         browser_factory: Callable[[], BrowserBackend] = default_browser_factory,
         desktop_factory: Callable[[], DesktopBackend] = default_desktop_factory,
         shell_factory: Callable[[], ShellBackend] = default_shell_factory,
+        browser_probe: Callable[[], BrowserBackend | None] | None = default_browser_probe,
     ):
         self.params = Params(dict(params))
         self.state: dict[str, Any] = dict(state or {})
@@ -47,6 +60,7 @@ class Ctx:
         self.shots_dir = self.run_dir / "screenshots"
         self._browser_factory, self._desktop_factory, self._shell_factory = (
             browser_factory, desktop_factory, shell_factory)
+        self._browser_probe = browser_probe
         self._browser: BrowserBackend | None = None
         self._desktop: DesktopBackend | None = None
         self._shell: ShellBackend | None = None
@@ -81,6 +95,20 @@ class Ctx:
 
     def has_browser(self) -> bool:
         return self._browser is not None and self._browser.is_connected()
+
+    def attach_live_browser(self) -> BrowserBackend | None:
+        """Attach to an already-running browser session if one exists (never launches a new browser)."""
+        if self.has_browser():
+            return self._browser
+        if self._browser_probe is None:
+            return None
+        try:
+            br = self._browser_probe()
+            if br is not None:
+                self._browser = br
+        except Exception:  # noqa: BLE001
+            pass
+        return self._browser if self.has_browser() else None
 
     def peek_desktop(self) -> DesktopBackend:
         """Desktop backend without marking it as used by the current step."""

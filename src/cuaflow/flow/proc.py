@@ -24,6 +24,8 @@ def _make_factories(args: dict) -> dict:
         shared = FakeDesktop()
         kwargs["desktop_factory"] = lambda: shared
     session_file = args.get("browser_session")
+    if desktop == "fake" and not session_file:
+        kwargs["browser_probe"] = None
     if session_file or args.get("headless") is not None:
         def browser_factory():
             from cuaflow.platform.browser import PersistentBrowser
@@ -35,7 +37,22 @@ def _make_factories(args: dict) -> dict:
                 kw["headless"] = bool(args["headless"])
             return PersistentBrowser.connect(**kw)
 
+        def browser_probe():
+            from cuaflow.platform.browser import BrowserNotRunning, PersistentBrowser
+
+            st = PersistentBrowser.status(session_file)
+            if not st.get("alive"):
+                return None
+            try:
+                kw = {"launch_if_missing": False}
+                if session_file:
+                    kw["session_file"] = session_file
+                return PersistentBrowser.connect(**kw)
+            except BrowserNotRunning:
+                return None
+
         kwargs["browser_factory"] = browser_factory
+        kwargs["browser_probe"] = browser_probe
     return kwargs
 
 
@@ -98,6 +115,10 @@ def main() -> int:
                     result = {"ok": True}
                 elif cmd == "get_state":
                     result = engine.ctx.state_json()
+                elif cmd == "update_output":
+                    result = engine.update_output(args.get("updates") or {})
+                elif cmd == "heal_browser":
+                    result = engine.heal_browser(keep_tabs=int(args.get("keep_tabs", 6)))
                 elif cmd == "finish":
                     result = engine.finish()
                 else:

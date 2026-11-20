@@ -1,120 +1,104 @@
 # cuaflow
 
-**cuaflow** 是一个通用的电脑操作智能体，能操作浏览器和 Windows 桌面。它 fork 自 [microsoft/CUAWright](https://github.com/microsoft/CUAWright)（MIT），并做了较大改造。
+**cuaflow** 是一个**面向长周期任务的自主电脑与浏览器操作智能体**，支持浏览器与 Windows 桌面操作。项目 fork 自 [microsoft/CUAWright](https://github.com/microsoft/CUAWright)（MIT）并全面重构。
 
-- **一句话下达任务**：Author 智能体边操作边把过程**记录成分步骤的 Python 脚本（flow）**，存入流程库。
-- **可重复执行**：相似任务会自动匹配已有 flow，换上新参数直接回放，不再调用大模型摸索。
-- **监督者逐步检查**：执行时，Supervisor 在每一步结束后按 L0–L3 分层校验，判断这一步是否真的达到了预期。
-- **自动修复**：某一步异常时，Repairer 在**同一个运行现场**（浏览器和窗口状态都保留）只重写这一步，重试通过后继续往下执行，修好的脚本另存为新版本，可以回滚。多次修不好就转人工处理。
-- **Web 控制台**：可以下达任务、实时查看步骤执行情况、处理人工工单、查看版本 diff 和回滚。命令行作为辅助工具。
+### 核心设计理念
+1. **AI 全流程自主规划执行长任务**：`MissionPlanner` 自动将复杂长任务（跨多阶段、多页翻页、数十上百条数据处理）拆解为动态执行计划（`explore` / `skill` / `batch` / `synthesize`），共享常驻浏览器登录态，持久化每一步与每一项检查点，支持**中断断点续跑（`resume`）**。
+2. **录制脚本是为了省 Token**：
+   - 跨任务直接复用已沉淀的参数化 `Flow` 脚本（**0 探索 Token**）；
+   - **单次长任务内即时编译省 Token（`run_batch`）**：处理 N 条列表/分页任务时，AI 仅在第 1 条上操作并自动编译成参数化 `Flow`，第 2..N 条直接交给脚本高速执行；
+   - 默认不重复回放刚录制完的任务（`verify_replay=False`），全链路统计真实 Token 消耗与脚本节省的 Token 数（`/api/stats`、`cuaflow stats`）。
+3. **五层监督者 + 四级自愈保障脚本持续稳定不出错**：
+   - **L0–L3 监督体系**（含 **L1.5 零 Token 浏览器运行时哨兵**：实时捕获主文档 HTTP 4xx/5xx、网络错误页、未捕获 JS 异常、登录失效重定向、弹窗遮挡、白屏与 DOM 卡死；平时 0 Token，仅在发现异常或定期抽检时**自适应唤醒 L2 视觉裁判**）。
+   - **四级自愈恢复**：Tier 0 零 Token 浏览器自愈（清理弹窗/多余标签页/CDP 重连）→ Tier 1 `Repairer` 原地热修补单步代码并沉淀新版本 → Tier 2 `FallbackAgent` **AI 自主接管现场**（处理登录过期等跨步绕路后交回脚本继续执行）→ Tier 3 无人值守安全终止或人工工单。
+4. **持续巡检与熔断保护（Schedules）**：支持将任意脚本或长任务设为定时持续监控任务，内置连续失败熔断器（Circuit Breaker），目标站点宕机时自动熔断防止空耗 Token。
 
 ```mermaid
-flowchart LR
-  U["任务 / 参数"] --> M{"流程库匹配"}
-  M -- "新任务" --> A["Author 录制 flow v1"]
-  M -- "命中" --> S["Supervisor 执行"]
-  A --> V["回放验证"] --> L[("流程库 + 版本")]
-  S --> R["Runner 子进程: 浏览器 / UIA / PowerShell"]
-  R --> C{"L0-L2 步骤校验"}
-  C -- "通过" --> S
-  C -- "失败" --> F["Repairer 原地修补并重试该步"]
-  F -- "修好" --> N["保存新版本 vN+1"] --> S
-  F -- "多次失败" --> T["人工工单"]
-  S --> J["L3 任务级验收"]
+flowchart TD
+  U["长周期自然语言任务 / 定时巡检"] --> RT{"智能路由"}
+  RT -- "命中已有 Flow" --> SUP["Supervisor 零探索回放"]
+  RT -- "多阶段 / 批量长任务" --> MP["MissionPlanner 动态规划 + 检查点"]
+  RT -- "单流程新任务" --> AU["Author 边做边编译 Flow v1"]
+  MP -- "探索收集列表" --> BR["常驻浏览器 (CDP + 标签页清理)"]
+  MP -- "run_batch: 第1项编译, 第2..N项零探索执行" --> SUP
+  SUP --> CHK{"L0 + L1 + L1.5 零Token哨兵 + 自适应L2"}
+  CHK -- "通过" --> SAVE_TOK["累计节省 Token · 继续下一步"]
+  CHK -- "异常" --> T0["Tier 0: 零Token清理弹窗/重连"]
+  T0 -- "仍失败" --> T1["Tier 1: Repairer 原地修补单步并存 vN+1"]
+  T1 -- "跨步异常(如登录过期)" --> T2["Tier 2: FallbackAgent AI自主接管恢复现场"]
+  T2 -- "恢复成功" --> SUP
 ```
 
-## 安装（Windows 10/11）
+## 安装（Windows 10/11 / Linux）
 
 ```powershell
 # Python 3.11+
 git clone https://github.com/yyy8080/cuaflow; cd cuaflow
 python -m venv .venv; .venv\Scripts\activate
-pip install -e ".[win]"
+pip install -e ".[win]"            # Linux 仅浏览器模式：pip install -e .
 playwright install chromium        # 或使用系统 Edge：$env:CUAFLOW_BROWSER_CHANNEL="msedge"
 cuaflow doctor                     # 检查环境
 ```
 
-> 这个智能体需要在**已登录的交互式桌面会话**中运行（UIA 和截图依赖桌面会话），不能以服务方式运行在 Session 0。更多说明见 [docs/windows.md](docs/windows.md)。
+> Windows 桌面自动化需在**已登录的交互式桌面会话**中运行，详见 [docs/windows.md](docs/windows.md)。
 
 ## 配置模型（兼容 OpenAI Chat Completions 接口）
 
 ```powershell
 $env:OPENAI_API_KEY="sk-..."
 cuaflow config model gpt-4.1 --base-url https://api.openai.com/v1
-# 可以为不同角色指定不同模型：author / supervisor / repairer / vision_judge / matcher
+# 支持按角色独立配置模型（大模型做规划/修复，轻量模型做匹配/视觉抽检）：
+# default | planner | author | supervisor | repairer | fallback | vision_judge | matcher
 cuaflow config model qwen-vl-max --role vision_judge --base-url https://dashscope.aliyuncs.com/compatible-mode/v1 --api-key-env DASHSCOPE_API_KEY
-# 模型不支持原生 tools 时：--tool-mode json
 cuaflow doctor --ping
 ```
 
 ## 使用
 
 ```powershell
-cuaflow serve                      # 打开 http://127.0.0.1:8765/?token=<终端里打印的 token>
-cuaflow do "在记事本里写 hello 并保存到 C:\Temp\a.txt"     # 匹配已有 flow，或录制一个新的
+# 1. 启动 Web 控制台 + 后台持续监控调度器
+cuaflow serve                      # 打开终端输出的 http://127.0.0.1:8765/?token=...
+
+# 2. 执行自然语言任务（自动路由：命中已有脚本 / 长任务自动规划 + 批量编译脚本 / 单流程录制）
+cuaflow do "登录后台，遍历所有分页收集待审订单，逐条核验并汇总金额" --unattended
+cuaflow do "导出本月销售报表" --mode auto
+
+# 3. 长任务中断后从检查点无损续跑（已完成的阶段和批处理项不会重复执行）
+cuaflow resume <task_id> --unattended
+
+# 4. 查看沉淀脚本、Token 节省统计与持续监控计划
+cuaflow stats
 cuaflow flows ls
-cuaflow run <flow_id> -p text=hi -p path=C:\Temp\b.txt     # 在监督下执行（含自动修复）
-cuaflow run <flow_id> --from-step save_as                   # 从指定步骤开始续跑
-cuaflow flows rollback <flow_id> 1
-cuaflow flows export <flow_id> my_flow.py
-cuaflow run-file examples/notepad_flow.py -p text=hi -p path=C:\Temp\c.txt  # 不经监督者、不调用模型，直接回放
+cuaflow run <flow_id> -p q=华东 --unattended
+cuaflow schedules add "每5分钟订单巡检" --interval 300 --flow <flow_id>
+cuaflow schedules ls
 ```
 
-## Flow 脚本格式
+## 监督层级与自愈机制
 
-```python
-from cuaflow.flow import Ctx, Flow, expect
-
-flow = Flow("导出报表", params={"q": {"type": "str", "description": "关键词"}},
-            output={"result": "str"}, start_url="https://example.com/report")
-
-@flow.step("打开报表页", expect="页面显示导出按钮")
-def open_page(c: Ctx):
-    page = c.browser.page()                       # Playwright 同步 API（Chromium/Edge，持久会话）
-    page.goto(c.params.start_url)
-    expect.visible(page.get_by_role("button", name="导出"))
-
-@flow.step("保存到本地", expect="文件已生成", side_effect=True)
-def save(c: Ctx):
-    win = c.desktop.window(title_re=".*另存为.*")  # pywinauto UIA
-    ...
-    expect.file_exists(c.params.path)
-```
-
-每个步骤都是一个函数，带有自然语言的 `expect` 描述和确定性的 `expect.*` 断言。各步骤之间通过 `c.state` 传递数据（会写入检查点）。完整 API 见 [flow_api.md](src/cuaflow/agents/prompts/flow_api.md)，示例见 [examples/](examples/)。
-
-## 监督层级
-
-| 层级 | 检查内容 | 成本 |
+| 层级 | 检查内容 | Token 消耗 |
 |---|---|---|
-| L0 | 步骤是否抛异常、是否超时、Runner 进程是否崩溃 | 无 |
-| L1 | 步骤内的 `expect.*` 确定性断言 | 无 |
-| L2 | 视觉模型对比步骤结束后的截图和 `expect` 描述。策略可选 `always` / `on_change`（默认，只检查新步骤和刚修改过的步骤）/ `sample` / `off` | 一次视觉调用 |
-| L3 | 整个任务结束后，判断输出和最终画面是否满足任务意图 | 一次调用 |
+| **L0** | 步骤异常、超时、Runner 子进程崩溃（崩溃自动从 `steps.jsonl` 检查点恢复） | **0** |
+| **L1** | 步骤内 `expect.*` 确定性断言 | **0** |
+| **L1.5（哨兵）** | 主文档 HTTP 4xx/5xx、网络错误页、未捕获 JS 异常、后台接口报错、意外跳转登录页、告警横幅、浏览器 `alert` 弹窗、白屏、DOM 无变化卡死、人机验证安全拦截 | **0** |
+| **L2（视觉/语义）** | 默认 `on_change`（仅新步骤/修补步骤检查，通过后置零开销）；当 **L1.5 哨兵发现可疑信号**或达到定期抽检周期时**自适应唤醒** | 按需 1 次调用 |
+| **L3（契约+终验）** | `output_schema` 输出字段非空契约校验（0 Token）+ 任务级最终核验 | 0 或 1 次调用 |
 
-某一步失败时的处理顺序：
-1. 按 `retries` 重试。
-2. Repairer 观察现场（截图、无障碍树、UIA 树、报错），重写这一步并在原地重试，最多 `max_repair_attempts` 次。
-3. 仍然失败就生成人工工单，可选择 继续 / 提示后再修 / 跳过 / 中止。
-4. 修复成功后，新版本自动入库。
-5. 如果新版本连续失败，自动回滚到上一个版本。
+## 安全边界
 
-## 安全
+- 服务默认只监听 `127.0.0.1`，所有 API 与 WebSocket 强制校验访问令牌。
+- Shell 命令经过危险模式黑名单拦截。
+- **人机验证安全红线**：遇到 CAPTCHA / Turnstile / 人机验证页面时，L1.5 哨兵被动识别后**立即停止自动操作**，绝不尝试绕过或破解，安全移交人工或终止报错。
 
-- 服务默认只监听 `127.0.0.1`，所有接口都需要 token。
-- Shell 命令经过黑名单过滤（如 `format`、`rm -rf /`、`Remove-Item -Recurse C:\` 等），可在设置里调整。
-- 标记了 `side_effect=True` 的步骤不会被盲目重试；有副作用的 flow 在录制完成后跳过回放验证。
-
-## 开发
+## 开发与测试
 
 ```bash
 pip install -e ".[test]" && playwright install chromium
-pytest -q                                   # Linux 下用 FakeDesktop 和无头 Chromium 运行，包括端到端自愈测试
-pytest -m windows tests/platform            # 仅限 Windows：真实的记事本冒烟测试
-cd web && npm ci && npm run build           # 控制台（React + Vite），构建产物输出到 src/cuaflow/server/static
+pytest -q                                   # 含真实无头 Chromium 长任务批量编译、L1.5 哨兵、会话过期自主接管、断点续跑端到端测试
+cd web && npm ci && npm run build && npx vitest run
 ```
 
-REST/WebSocket 接口文档见 [docs/api.md](docs/api.md)。
+REST/WebSocket 接口契约见 [docs/api.md](docs/api.md)。
 
 ## 许可
 

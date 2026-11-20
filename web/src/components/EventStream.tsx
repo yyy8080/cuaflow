@@ -3,11 +3,13 @@ import type { CuaEvent } from '../api';
 import { ROLE_LABEL, fmtTime } from '../lib/format';
 import { eventRole } from '../lib/runState';
 
-const ROLES = ['all', 'author', 'supervisor', 'repairer', 'system'] as const;
+const ROLES = ['all', 'planner', 'author', 'supervisor', 'repairer', 'fallback', 'system'] as const;
 type RoleFilter = (typeof ROLES)[number];
 
 const TYPE_LABEL: Record<string, string> = {
   task_status: '任务',
+  plan_updated: '规划更新',
+  batch_progress: '批量进度',
   run_status: '运行',
   step_start: '步骤开始',
   step_end: '步骤结束',
@@ -19,6 +21,8 @@ const TYPE_LABEL: Record<string, string> = {
   ticket_open: '工单',
   ticket_resolved: '工单处理',
   version_created: '新版本',
+  schedule_run: '定时执行',
+  schedule_tripped: '监控熔断',
   log: '日志',
 };
 
@@ -31,6 +35,16 @@ function describe(ev: CuaEvent): string {
       return d.text ?? '';
     case 'log':
       return d.text ?? '';
+    case 'plan_updated': {
+      const phases = Array.isArray(d.phases) ? d.phases : [];
+      return phases.map((p: any) => `${p.title}[${p.status ?? 'pending'}]`).join(' → ') || '规划已更新';
+    }
+    case 'batch_progress':
+      return `[${d.batch_id ?? 'batch'}] ${d.completed}/${d.total} (${d.last_status}) · 脚本 ${d.flow_id ?? ''}`;
+    case 'schedule_run':
+      return `监控 ${d.schedule_id} 执行${d.succeeded ? '成功' : '失败'}`;
+    case 'schedule_tripped':
+      return `监控 ${d.name ?? d.schedule_id} 连续失败 ${d.consecutive_failures} 次，已自动熔断暂停`;
     case 'check':
       return `${d.level} ${d.passed ? '通过' : '失败'}${d.detail ? ' — ' + d.detail : ''}`;
     case 'step_start':
