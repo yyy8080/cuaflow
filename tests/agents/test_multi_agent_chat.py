@@ -262,3 +262,125 @@ def test_single_window_standalone_webui_launcher_uses_app_shell(monkeypatch, tmp
     assert spawned["cmd"][0] == "/fake/msedge"
     assert "--app=http://127.0.0.1:8765/?token=abc" in spawned["cmd"]
     assert any(a.startswith("--user-data-dir=") and "webui_shell" in a for a in spawned["cmd"])
+
+
+def test_legacy_settings_auto_migrates_old_35_operator_turn_limit(tmp_path: Path):
+    """验证旧版 v0.2.0 落盘的 operator_turn_limit=35 在升级加载时会自动迁移至 120，避免沿用旧上限报错。"""
+    import json
+    from cuaflow.config import load_settings
+
+    sf = tmp_path / "legacy_settings.json"
+    sf.write_text(
+        json.dumps(
+            {
+                "models": {"default": {"api_key": "sk-keep-me", "model": "gpt-4o"}},
+                "coordinator": {"max_parallel_workers": 4, "turn_limit": 12, "operator_turn_limit": 35},
+            }
+        ),
+        encoding="utf-8",
+    )
+    loaded = load_settings(sf)
+    assert loaded.models.default.api_key == "sk-keep-me"
+    assert loaded.coordinator.operator_turn_limit == 120
+    assert loaded.coordinator.turn_limit == 24
+    assert loaded.coordinator.max_auto_continues == 2
+
+
+def test_operator_auto_compacts_and_continues_across_segments_without_failing(tmp_path: Path):
+    """验证直连子智能体单阶段步数耗尽时，会自动压缩上下文并无缝跨分段续跑完成长任务，不会触发 turn_limit 失败。"""
+    step_counter = {"n": 0}
+
+    def operator_fn(messages: list[dict[str, Any]], tools: list[dict] | None):
+        # 无工具列表时说明正在生成分段上下文压缩摘要
+        if not tools:
+            return f"已完成前 {step_counter['n']} 步计数，c.state['step'] 已更新，继续累加至 8 后结束。"
+        step_counter["n"] += 1
+        cur = step_counter["n"]
+        if cur < 8:
+            return {
+                "tool": "python",
+                "args": {"code": f"c.state['step'] = {cur}\nc.output['last_step'] = {cur}\nprint('step', {cur})"},
+            }
+        return {
+            "tool": "finish",
+            "args": {"summary": f"跨分段自动续跑完成共 {cur} 轮", "output": {"total_steps": cur}},
+        }
+
+    svc = Services(
+        root=tmp_path / "lib",
+        llm_override={"operator": FakeLLM(operator_fn)},
+        runner_opts={"desktop": "fake"},
+        settings_file=tmp_path / "settings.json",
+        start_worker=False,
+    )
+    try:
+        s = svc.get_settings()
+        s.coordinator.operator_turn_limit = 5
+        s.coordinator.max_auto_continues = 2
+        svc.update_settings(s)
+
+        run = svc.store.create_run("direct", {}, steps=[])
+        res = svc.operator.execute(run["id"], "连续执行 8 轮操作并保持实时 runner 状态", unattended=True)
+        assert res["status"] == "succeeded", res
+        assert res["output"]["total_steps"] == 8
+        # 验证跨分段压缩续跑过程中底层 RunnerClient 会话并未中断重建
+        assert res["output"]["last_step"] == 7
+    finally:
+        svc.close()
+
+
+def test_operator_interactive_turn_limit_pauses_for_release_then_continues(tmp_path: Path):
+    """验证交互模式下即使自动续跑段数也耗尽，不会报错丢失现场，而是挂起等待用户放行继续追加轮数直至成功。"""
+    step_counter = {"n": 0}
+
+    def operator_fn(messages: list[dict[str, Any]], tools: list[dict] | None):
+        if not tools:
+            return "阶段性进展：已完成前 5 步，还差最后 1 步收尾。"
+        step_counter["n"] += 1
+        cur = step_counter["n"]
+        if cur <= 5:
+            return {"tool": "python", "args": {"code": f"c.output['progress'] = {cur}\nprint({cur})"}}
+        return {"tool": "finish", "args": {"summary": "用户放行追加步数后顺利完成", "output": {"done_at": cur}}}
+
+    svc = Services(
+        root=tmp_path / "lib",
+        llm_override={"operator": FakeLLM(operator_fn)},
+        runner_opts={"desktop": "fake"},
+        settings_file=tmp_path / "settings.json",
+        start_worker=True,
+    )
+    try:
+        s = svc.get_settings()
+        s.coordinator.operator_turn_limit = 5
+        s.coordinator.max_auto_continues = 0
+        svc.update_settings(s)
+
+        sess = svc.store.create_chat_session("超限续跑测试")
+        sid = sess["id"]
+        spawned = svc.pool.dispatch(
+            sid,
+            [{"name": "长流程探索员", "agent_kind": "explorer", "instruction": "执行 6 步长流程任务"}],
+        )
+        wid = spawned[0]["id"]
+
+        # 满 5 轮后应进入 waiting_approval 挂起等待，而非直接报 turn_limit 失败
+        ok_wait = _wait_until(
+            lambda: (svc.store.get_worker(wid) or {}).get("status") == "waiting_approval",
+            timeout=15.0,
+        )
+        assert ok_wait, f"worker={svc.store.get_worker(wid)}"
+
+        # 用户点击放行继续追加步数
+        svc.pool.approve(wid, action="continue")
+
+        ok_done = _wait_until(
+            lambda: (svc.store.get_worker(wid) or {}).get("status") == "succeeded",
+            timeout=15.0,
+        )
+        assert ok_done, f"worker={svc.store.get_worker(wid)}"
+        w = svc.store.get_worker(wid)
+        assert w is not None
+        assert w["output"]["progress"] == 5
+        assert w["output"]["done_at"] == 6
+    finally:
+        svc.close()

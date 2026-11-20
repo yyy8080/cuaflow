@@ -6,7 +6,7 @@ import json
 import time
 from typing import Any
 
-from cuaflow.agents.loop import Cancelled, Tool, ToolAgent, ToolResult
+from cuaflow.agents.loop import AgentResult, Cancelled, Tool, ToolAgent, ToolResult
 from cuaflow.agents.supervisor import Deps
 from cuaflow.agents.tools import RunnerGuard, common_tools, load_prompt, shot_path
 from cuaflow.agents.tracking import CancelToken, RunTracker
@@ -35,7 +35,7 @@ class DirectOperator:
         turn_limit: int | None = None,
         runner: RunnerClient | None = None,
     ) -> dict[str, Any]:
-        """在独立运行目录与运行器进程中直接执行子任务，支持中途转向与审批放行。"""
+        """在独立运行目录与运行器进程中直接执行子任务，支持多阶段自动压缩续跑、中途转向与超限放行续跑。"""
         cancel = cancel or CancelToken()
         store, s = self.d.store, self.d.settings()
         effective_unattended = s.supervisor.unattended if unattended is None else bool(unattended)
@@ -207,26 +207,75 @@ class DirectOperator:
                     intro.append(f"输入参数: {json.dumps(params, ensure_ascii=False)}")
                 intro.append(f"当前本地时间: {time.strftime('%Y-%m-%d %H:%M:%S %A')}")
 
+                base_limit = max(5, int(turn_limit or s.coordinator.operator_turn_limit or 120))
+                max_cont = 0 if turn_limit is not None else max(0, int(s.coordinator.max_auto_continues or 0))
+
                 res = agent.run(
                     "\n\n".join(intro),
-                    turn_limit=turn_limit or s.coordinator.operator_turn_limit,
+                    turn_limit=base_limit,
+                    max_continuations=max_cont,
                 )
+
+                # 交互模式下，若多阶段自动续跑后仍触及轮数上限，绝不直接报错丢弃实时页面，而是挂起询问用户继续放行或汇总现有成果
+                while (
+                    not res.done
+                    and res.reason == "turn_limit"
+                    and not cancel.cancelled
+                    and not captcha_aborted
+                    and not effective_unattended
+                ):
+                    progress = agent.summarize_progress()
+                    tr.log(role_name, "observation", f"[达到阶段步数上限，等待确认续跑] {progress}")
+                    try:
+                        ans = request_approval(
+                            f"子智能体已连续执行 {res.turns} 轮操作仍未全部收尾。\n"
+                            f"阶段性进展：{progress[:260]}\n"
+                            f"点击【批准放行】将压缩上下文并继续追加 {base_limit} 轮步数；点击【跳过此步】将直接保存并汇报目前已取得的成果。"
+                        )
+                    except Cancelled:
+                        break
+                    if "跳过该动作" in ans:
+                        res = AgentResult(
+                            True,
+                            final={"summary": f"【阶段性成果汇总（共执行 {res.turns} 轮）】\n{progress}", "output": {}},
+                            turns=res.turns,
+                            messages=agent.messages,
+                        )
+                        break
+                    res = agent.continue_after_limit(
+                        base_limit,
+                        instruction=f"{ans}\n请基于当前实时页面/桌面状态继续完成剩余未竟工作，完成后立即调用 finish。",
+                    )
+
                 if captcha_aborted:
                     return tr.status("failed", error=captcha_aborted[-1], usage=meter.snapshot())
                 if cancel.cancelled:
                     return tr.status("aborted", error="aborted by user", usage=meter.snapshot())
-                if not res.done:
-                    return tr.status(
-                        "failed",
-                        error=f"operator did not finish: {res.reason}",
-                        usage=meter.snapshot(),
-                    )
 
                 runner_out: dict[str, Any] = {}
                 try:
-                    runner_out = rc.finish() or {}
+                    fin = rc.finish() or {}
+                    if isinstance(fin.get("output"), dict):
+                        runner_out = fin["output"]
                 except RunnerError:
                     runner_out = {}
+
+                if not res.done:
+                    if res.reason == "turn_limit":
+                        progress = agent.summarize_progress()
+                        return tr.status(
+                            "failed",
+                            output={**runner_out, "partial_summary": progress},
+                            error=f"已达到自动执行轮数上限（累计 {res.turns} 轮）。阶段性进展：{progress[:300]}",
+                            usage=meter.snapshot(),
+                        )
+                    return tr.status(
+                        "failed",
+                        output=runner_out or None,
+                        error=f"直连子智能体未能完成：{res.reason}",
+                        usage=meter.snapshot(),
+                    )
+
                 final_payload = res.final if isinstance(res.final, dict) else {}
                 merged_output = {
                     **runner_out,

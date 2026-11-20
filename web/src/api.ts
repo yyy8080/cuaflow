@@ -305,6 +305,7 @@ export type Settings = {
     max_parallel_workers?: number;
     turn_limit?: number;
     operator_turn_limit?: number;
+    max_auto_continues?: number;
     auto_report?: boolean;
   };
   supervisor: {

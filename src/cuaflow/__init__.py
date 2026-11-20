@@ -1,6 +1,3 @@
-"""cuaflow：支持步骤化执行、运行监督与自愈流程的浏览器及 Windows 桌面智能体。
+"""cuaflow：对话式多智能体并行协同的浏览器与桌面自动化工作台。"""
 
-衍生自 microsoft/CUAWright（MIT 许可证）。
-"""
-
-__version__ = "0.2.0"
+__version__ = "0.2.1"

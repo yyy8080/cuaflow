@@ -81,8 +81,9 @@ class PlannerConfig(BaseModel):
 
 class CoordinatorConfig(BaseModel):
     max_parallel_workers: int = 4
-    turn_limit: int = 12
-    operator_turn_limit: int = 35
+    turn_limit: int = 24
+    operator_turn_limit: int = 120
+    max_auto_continues: int = 2
     auto_report: bool = True
 
 
@@ -106,7 +107,15 @@ def load_settings(path: Path | None = None) -> Settings:
     path = path or settings_path()
     with _lock:
         if path.is_file():
-            return Settings.model_validate(json.loads(path.read_text(encoding="utf-8")))
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            # 平滑迁移 v0.2.0 落盘的旧版过低默认步数（35 轮 / 12 轮），避免升级后仍沿用旧上限导致半途中断
+            coord = raw.get("coordinator")
+            if isinstance(coord, dict) and "max_auto_continues" not in coord:
+                if coord.get("operator_turn_limit") == 35:
+                    coord["operator_turn_limit"] = 120
+                if coord.get("turn_limit") == 12:
+                    coord["turn_limit"] = 24
+            return Settings.model_validate(raw)
     return Settings()
 
 

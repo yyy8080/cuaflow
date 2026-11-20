@@ -176,19 +176,38 @@ export function SettingsPage() {
             />
           </div>
           <div className="field">
-            <label>直连子智能体单次步数上限</label>
+            <label>直连子智能体单阶段步数预算（默认 120，最大 1000）</label>
             <input
               type="number"
-              min={5}
-              max={120}
-              step={5}
-              value={s.coordinator?.operator_turn_limit ?? 35}
+              min={10}
+              max={1000}
+              step={10}
+              value={s.coordinator?.operator_turn_limit ?? 120}
               onChange={(e) =>
                 upd((d) => ({
                   ...d,
                   coordinator: {
                     ...d.coordinator,
-                    operator_turn_limit: Math.min(120, Math.max(5, parseInt(e.target.value, 10) || 35)),
+                    operator_turn_limit: Math.min(1000, Math.max(10, parseInt(e.target.value, 10) || 120)),
+                  },
+                }))
+              }
+            />
+          </div>
+          <div className="field">
+            <label>超长任务自动压缩续跑段数（0–10，默认 2 段即最高自动跑 3× 步数）</label>
+            <input
+              type="number"
+              min={0}
+              max={10}
+              step={1}
+              value={s.coordinator?.max_auto_continues ?? 2}
+              onChange={(e) =>
+                upd((d) => ({
+                  ...d,
+                  coordinator: {
+                    ...d.coordinator,
+                    max_auto_continues: Math.min(10, Math.max(0, parseInt(e.target.value, 10) || 0)),
                   },
                 }))
               }
