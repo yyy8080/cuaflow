@@ -1,4 +1,4 @@
-"""Repairer agent: patches ONE failing step in the live, paused runner session."""
+"""修补智能体 `Repairer`：在暂停但保持存活的运行器会话中对单个失败步骤进行热修补。"""
 
 from __future__ import annotations
 

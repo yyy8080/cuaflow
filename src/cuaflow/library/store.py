@@ -1,4 +1,4 @@
-"""Persistent store: flows + versions (files on disk), runs, tasks, schedules, tickets, events (SQLite)."""
+"""持久化存储：流程与版本（磁盘文件），以及运行记录、任务、定时调度、工单和事件（SQLite）。"""
 
 from __future__ import annotations
 
@@ -114,7 +114,7 @@ class Store:
                 if col not in existing:
                     self._db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
 
-    # ------------------------------------------------------------------ utils
+    # ------------------------------------------------------------------ 工具方法
     def _row(self, row: sqlite3.Row | None) -> dict[str, Any] | None:
         if row is None:
             return None
@@ -154,7 +154,7 @@ class Store:
         vals = [self._j(v) if k in _JSON_COLS else (int(v) if isinstance(v, bool) else v) for k, v in fields.items()]
         self._exec(f"UPDATE {table} SET {cols} WHERE {key} = ?", [*vals, key_val])
 
-    # ------------------------------------------------------------------ paths
+    # ------------------------------------------------------------------ 路径辅助
     def flow_dir(self, flow_id: str) -> Path:
         return self.root / "flows" / flow_id
 
@@ -169,7 +169,7 @@ class Store:
         p.mkdir(parents=True, exist_ok=True)
         return p
 
-    # ------------------------------------------------------------------ flows
+    # ------------------------------------------------------------------ 流程管理
     def create_flow(self, meta: dict[str, Any], source: str, author: str = "author",
                     reason: str = "initial recording", tags: list[str] | None = None) -> dict[str, Any]:
         base = slugify(meta.get("name", "")) or "flow"
@@ -292,7 +292,7 @@ class Store:
         rows = self._query("SELECT version FROM versions WHERE flow_id = ? ORDER BY version DESC", [flow_id])
         return [self.get_version(flow_id, r["version"], with_source=False) for r in rows]  # type: ignore[misc]
 
-    # ------------------------------------------------------------------ step stats
+    # ------------------------------------------------------------------ 步骤统计
     def mark_needs_verify(self, flow_id: str, step_id: str, value: bool = True) -> None:
         self._exec("INSERT INTO step_stats (flow_id, step_id, needs_verify) VALUES (?,?,?) "
                    "ON CONFLICT(flow_id, step_id) DO UPDATE SET needs_verify = excluded.needs_verify",
@@ -312,7 +312,7 @@ class Store:
         return self._one("SELECT * FROM step_stats WHERE flow_id = ? AND step_id = ?", [flow_id, step_id]) or {
             "runs": 0, "passes": 0, "total_ms": 0, "sq_ms": 0.0, "needs_verify": 1}
 
-    # ------------------------------------------------------------------ runs
+    # ------------------------------------------------------------------ 运行记录
     def create_run(self, kind: str, params: dict[str, Any], flow_id: str | None = None,
                    version: int | None = None, task_id: str | None = None,
                    steps: list[dict[str, Any]] | None = None) -> dict[str, Any]:
@@ -346,7 +346,7 @@ class Store:
                            [flow_id, version, n])
         return [r["status"] for r in rows]
 
-    # ------------------------------------------------------------------ tasks
+    # ------------------------------------------------------------------ 任务管理
     def create_task(self, instruction: str, start_url: str | None, params: dict[str, Any],
                     force_new: bool = False, mode: str = "auto") -> dict[str, Any]:
         tid, ts = new_id("task"), now_iso()
@@ -392,7 +392,7 @@ class Store:
                 row["sub_runs"] = []
         return rows
 
-    # ------------------------------------------------------------------ schedules (continuous monitors)
+    # ------------------------------------------------------------------ 定时调度（持续监控）
     def create_schedule(
         self,
         name: str,
@@ -484,7 +484,7 @@ class Store:
                 status=status,
             )
 
-    # ------------------------------------------------------------------ global telemetry
+    # ------------------------------------------------------------------ 全局遥测统计
     def global_stats(self) -> dict[str, Any]:
         flows_n = (self._one("SELECT COUNT(*) AS n FROM flows") or {}).get("n") or 0
         repairs_n = (self._one("SELECT COUNT(*) AS n FROM versions WHERE author = 'repairer'") or {}).get("n") or 0
@@ -536,7 +536,7 @@ class Store:
             "schedules_tripped": sum(1 for s in sched_rows if s.get("status") == "tripped"),
         }
 
-    # ------------------------------------------------------------------ tickets
+    # ------------------------------------------------------------------ 人工工单
     def create_ticket(self, run_id: str, reason: str, step_id: str | None = None, flow_id: str | None = None,
                       screenshot: str | None = None) -> dict[str, Any]:
         tid = new_id("tkt")
@@ -557,7 +557,7 @@ class Store:
             return self._query("SELECT * FROM tickets WHERE status = ? ORDER BY created_at DESC", [status])
         return self._query("SELECT * FROM tickets ORDER BY created_at DESC")
 
-    # ------------------------------------------------------------------ events
+    # ------------------------------------------------------------------ 事件日志
     def add_event(self, ev: dict[str, Any]) -> dict[str, Any]:
         cur = self._exec("INSERT INTO events (ts, type, run_id, task_id, flow_id, step_id, data) "
                          "VALUES (?,?,?,?,?,?,?)",

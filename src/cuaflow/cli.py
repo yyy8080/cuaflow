@@ -1,4 +1,4 @@
-"""cuaflow command line: serve the console, run long-horizon missions/flows, schedules, stats, and setup checks."""
+"""cuaflow 命令行工具：启动 Web 控制台、运行长程任务与工作流、管理定时巡检、查看统计信息及环境自检。"""
 
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ def _services(start_worker: bool = False, headless: Optional[bool] = None):
 
 
 def _console_operator(svc, unattended: bool = False) -> None:
-    """Print live events (steps, L1.5/L2 checks, batch progress, plan updates) and optionally answer human tickets."""
+    """实时打印运行事件（步骤进度、L1.5/L2 校验、批量执行进度、规划更新），并在非无人值守模式下交互处理人工工单。"""
 
     def on_event(ev: dict[str, Any]) -> None:
         t, d = ev["type"], ev.get("data", {})
@@ -99,7 +99,7 @@ def _answer_ticket(svc, ticket: dict[str, Any]) -> None:
 @app.command()
 def serve(host: str = "127.0.0.1", port: int = 8765, token: Optional[str] = typer.Option(None, envvar="CUAFLOW_TOKEN"),
           allow_remote: bool = typer.Option(False, help="allow binding to a non-loopback address")):
-    """Start the web console + API server + continuous scheduler."""
+    """启动 Web 控制台、API 服务器与持续定时调度器。"""
     import uvicorn
 
     from cuaflow.platform.paths import data_dir
@@ -127,7 +127,7 @@ def do(
     unattended: bool = typer.Option(False, help="autonomous unattended mode (never block on human tickets)"),
     headless: Optional[bool] = typer.Option(None, "--headless/--headed"),
 ):
-    """Run a natural-language task: auto-plan long-horizon missions, reuse compiled flows, or record new ones."""
+    """执行自然语言任务：自动规划长程任务、复用已编译工作流或录制新工作流。"""
     svc = _services(headless=headless)
     _console_operator(svc, unattended=unattended)
     task = svc.orchestrator.submit_task(instruction, start_url, _parse_params(param), force_new, mode=mode,
@@ -147,7 +147,7 @@ def do(
 @app.command()
 def resume(task_id: str, unattended: bool = typer.Option(False, help="autonomous unattended mode"),
            headless: Optional[bool] = typer.Option(None, "--headless/--headed")):
-    """Resume an interrupted or failed long-horizon task from its saved checkpoint."""
+    """从已保存的检查点恢复中断或失败的长程任务。"""
     svc = _services(headless=headless)
     _console_operator(svc, unattended=unattended)
     svc.orchestrator.resume_task(task_id, enqueue=False)
@@ -165,7 +165,7 @@ def run(
     unattended: bool = typer.Option(False, help="autonomous unattended mode (never block on human tickets)"),
     headless: Optional[bool] = typer.Option(None, "--headless/--headed"),
 ):
-    """Execute a recorded flow under supervision (with 4-tier self-healing)."""
+    """在运行监督下执行已录制的工作流（支持四级自愈机制）。"""
     svc = _services(headless=headless)
     _console_operator(svc, unattended=unattended)
     r = svc.orchestrator.submit_run(flow_id, _parse_params(param), version=version, from_step=from_step,
@@ -178,7 +178,7 @@ def run(
 
 @app.command()
 def stats():
-    """Show token consumption, script savings, and flow stability telemetry."""
+    """展示 Token 消耗、脚本复用节省量及工作流稳定性遥测统计。"""
     svc = _services()
     console.print_json(json.dumps(svc.store.global_stats(), ensure_ascii=False))
 
@@ -216,7 +216,7 @@ def flows_rollback(flow_id: str, version: int):
 
 @flows_app.command("export")
 def flows_export(flow_id: str, out: Path, version: Optional[int] = None):
-    """Write the flow source to a file (it can be run standalone with `cuaflow run-file`)."""
+    """将工作流源码导出到指定文件（可通过 `cuaflow run-file` 独立运行）。"""
     svc = _services()
     out.write_text(svc.store.read_source(flow_id, version), encoding="utf-8")
     console.print(f"written {out}")
@@ -247,7 +247,7 @@ def schedules_add(
     max_runs: Optional[int] = None,
     max_failures: int = 3,
 ):
-    """Create a continuous scheduled flow/task monitor (runs when `cuaflow serve` is active)."""
+    """创建持续定时执行的工作流或任务巡检计划（在 `cuaflow serve` 运行期间生效）。"""
     svc = _services()
     if not flow_id and not instruction:
         raise typer.BadParameter("specify either --flow <flow_id> or --task <instruction>")
@@ -276,7 +276,7 @@ def schedules_rm(schedule_id: str):
 @app.command("run-file")
 def run_file(path: Path, param: list[str] = typer.Option(None, "--param", "-p"),
              run_dir: Path = typer.Option(Path("cuaflow_run"), help="artifacts directory")):
-    """Run a flow file directly without supervision or LLMs (plain replay)."""
+    """在无运行监督且不调用大语言模型的情况下直接回放工作流文件（纯脚本回放）。"""
     from cuaflow.flow.client import RunnerClient
 
     with RunnerClient(log_path=run_dir / "runner.log") as rc:
@@ -296,7 +296,7 @@ def config_model(model: str, base_url: str = typer.Option(..., help="OpenAI-comp
                  api_key_env: str = "OPENAI_API_KEY", role: str = typer.Option("default", help="default|planner|author|"
                                                                                                "supervisor|repairer|fallback|vision_judge|matcher"),
                  vision: bool = True, tool_mode: str = "native", api: str = "chat"):
-    """Set the model for a role."""
+    """为指定角色配置模型参数。"""
     from cuaflow.config import ModelSpec, load_settings, save_settings
 
     s = load_settings()
@@ -323,7 +323,7 @@ def config_show():
 
 @app.command("install-browser")
 def install_browser():
-    """Download standalone Playwright Chromium (optional when system Edge/Chrome is already installed)."""
+    """下载独立的 Playwright Chromium 浏览器（已安装系统 Edge/Chrome 时为可选操作）。"""
     from cuaflow.platform.browser.session import install_playwright_chromium
 
     code = install_playwright_chromium()
@@ -332,7 +332,7 @@ def install_browser():
 
 @app.command()
 def doctor(ping: bool = typer.Option(False, help="send a tiny request to each configured model")):
-    """Check the installation: runtime, browser (Chromium/Edge/Chrome), Windows automation libs, model keys."""
+    """检查安装与运行环境：Python 运行时、浏览器（Chromium/Edge/Chrome）、Windows 自动化依赖库及模型密钥。"""
     from cuaflow.config import load_settings
     from cuaflow.platform.base import IS_WINDOWS
     from cuaflow.platform.browser.session import resolve_browser_executable

@@ -83,7 +83,7 @@ function eventClass(ev: CuaEvent): string {
   return '';
 }
 
-/** Live event stream with role filter and stick-to-bottom autoscroll. */
+/** 支持按角色筛选与贴底自动滚动的实时事件流组件。 */
 export function EventStream({ events, onSelectStep }: { events: CuaEvent[]; onSelectStep?: (stepId: string) => void }) {
   const [role, setRole] = useState<RoleFilter>('all');
   const [follow, setFollow] = useState(true);

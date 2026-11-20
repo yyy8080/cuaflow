@@ -1,4 +1,4 @@
-"""Match a new task against the flow library: run an existing flow, adapt one, launch a multi-phase mission, or record a new flow."""
+"""将新任务与流程库进行匹配：直接运行已有流程、适配改造流程、启动多阶段长程任务，或录制新流程。"""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ _LONG_HORIZON_PATTERNS = re.compile(
 
 
 def looks_long_horizon(instruction: str) -> bool:
-    """Fast heuristic detecting batch/loop/pagination/multi-stage instructions."""
+    """快速启发式检测批量、循环、翻页或多阶段指令。"""
     text = (instruction or "").strip()
     if len(text) >= 260:
         return True

@@ -1,26 +1,24 @@
-"""Persistent, detached Chromium/Edge browser driven over CDP (``BrowserBackend``).
+"""基于 CDP 驱动的持久化分离式 Chromium/Edge 浏览器后端（``BrowserBackend`` 实现）。
 
-The browser process is launched *detached* (own session / process group, or
-``DETACHED_PROCESS`` on Windows) with ``--remote-debugging-port=0`` and a persistent
-``--user-data-dir`` (login state survives). Its endpoint is persisted in a session JSON
-file so any later process (flow runner, ``cuaflow-tool``, repairer) can re-attach::
+浏览器进程以分离模式（独立会话/进程组，Windows 下使用 ``DETACHED_PROCESS``）启动，
+启用 ``--remote-debugging-port=0`` 与持久化 ``--user-data-dir``（保留登录态）。
+其调试端点会写入会话 JSON 文件，以便后续任意进程（工作流执行器、``cuaflow-tool``、修复器）重新连接::
 
     from cuaflow.platform.browser import PersistentBrowser
 
-    br = PersistentBrowser.connect()          # reuse live session or launch a new one
+    br = PersistentBrowser.connect()          # 复用存活会话或启动新浏览器
     page = br.page()
     page.goto("https://example.com")
     print(br.aria_snapshot())
-    br.disconnect()                           # browser keeps running
+    br.disconnect()                           # 断开连接，浏览器在后台继续运行
     ...
-    PersistentBrowser.connect(launch_if_missing=False).shutdown()   # kill it
+    PersistentBrowser.connect(launch_if_missing=False).shutdown()   # 彻底关闭浏览器
 
 .. warning::
-   This uses the Playwright **sync** API. It cannot be used from a thread that is running
-   an asyncio event loop (Playwright raises "It looks like you are using Playwright Sync API
-   inside the asyncio loop"). From async code, run it in a worker thread
-   (``await asyncio.to_thread(...)``) or a subprocess, and keep every call on the thread that
-   created the ``PersistentBrowser`` (Playwright sync objects are thread-affine).
+   本模块基于 Playwright **同步（sync）** API 实现，不能在正在运行 asyncio 事件循环的线程中直接调用
+   （否则 Playwright 会抛出异常）。在异步代码中，请放入工作线程（``await asyncio.to_thread(...)``）
+   或独立子进程中执行，并确保所有方法调用均在创建 ``PersistentBrowser`` 的同一线程内完成
+   （Playwright 同步对象具有线程亲和性）。
 """
 
 from __future__ import annotations
@@ -40,7 +38,7 @@ from cuaflow.platform._proc import IS_WINDOWS, kill_tree, pid_alive, process_cmd
 from cuaflow.platform.paths import browser_profile_dir, browser_session_file
 
 ENV_HEADLESS = "CUAFLOW_HEADLESS"
-ENV_BROWSER_CHANNEL = "CUAFLOW_BROWSER_CHANNEL"  # chromium (default) | msedge | chrome
+ENV_BROWSER_CHANNEL = "CUAFLOW_BROWSER_CHANNEL"  # 浏览器渠道：chromium（默认）| msedge | chrome
 ENV_BROWSER_EXECUTABLE = "CUAFLOW_BROWSER_EXECUTABLE"
 ENV_NO_SANDBOX = "CUAFLOW_NO_SANDBOX"
 
@@ -54,7 +52,7 @@ class BrowserError(RuntimeError):
 
 
 class BrowserNotRunning(BrowserError):
-    """No live browser session and ``launch_if_missing=False``."""
+    """当前无存活的浏览器会话且指定了 ``launch_if_missing=False``。"""
 
 
 class BrowserLaunchError(BrowserError):
@@ -62,12 +60,12 @@ class BrowserLaunchError(BrowserError):
 
 
 # ---------------------------------------------------------------------------
-# configuration helpers
+# 浏览器配置与可执行文件查找辅助函数
 # ---------------------------------------------------------------------------
 
 
 def default_headless() -> bool:
-    """``CUAFLOW_HEADLESS`` (1/0) wins; else headed on Windows/macOS, headless on Linux without DISPLAY."""
+    """优先遵循环境变量 ``CUAFLOW_HEADLESS``（1/0）；否则在 Windows/macOS 下默认有头模式，在无 DISPLAY 的 Linux 下默认无头模式。"""
     env = os.environ.get(ENV_HEADLESS, "").strip().lower()
     if env in ("1", "true", "yes", "on"):
         return True
@@ -89,7 +87,7 @@ def _windows_candidates(channel: str) -> list[Path]:
 
 
 def find_channel_executable(channel: str) -> str | None:
-    """Locate an installed Edge/Chrome executable for ``channel`` (``msedge`` / ``chrome``)."""
+    """查找指定 ``channel``（``msedge`` / ``chrome``）已安装的浏览器可执行文件路径。"""
     channel = (channel or "").lower()
     if channel in ("", "chromium"):
         return None
@@ -142,7 +140,7 @@ def resolve_browser_executable(
     executable: str | None = None,
     pw: Any | None = None,
 ) -> tuple[str, str]:
-    """Locate a usable Chromium/Edge/Chrome binary, falling back to system Edge/Chrome when Chromium isn't installed."""
+    """解析可用的 Chromium/Edge/Chrome 可执行文件路径；未安装独立 Chromium 时自动回退至系统已安装的 Edge 或 Chrome。"""
     exe_override = executable or os.environ.get(ENV_BROWSER_EXECUTABLE)
     if exe_override:
         if not Path(exe_override).exists():
@@ -168,7 +166,7 @@ def resolve_browser_executable(
 
 
 def install_playwright_chromium() -> int:
-    """Download standalone Playwright Chromium via Playwright's bundled Node driver (works in frozen builds)."""
+    """通过 Playwright 内置的 Node 驱动下载独立 Chromium 内核（兼容打包后的独立可执行环境）。"""
     from playwright._impl._driver import compute_driver_executable, get_driver_env
 
     driver_exe, driver_cli = compute_driver_executable()
@@ -177,7 +175,7 @@ def install_playwright_chromium() -> int:
 
 
 # ---------------------------------------------------------------------------
-# session file / CDP probing
+# 会话文件读写与 CDP 端点探测
 # ---------------------------------------------------------------------------
 
 
@@ -198,12 +196,12 @@ def write_session(session_file: str | Path, info: dict[str, Any]) -> None:
 
 
 def _local_opener() -> urllib.request.OpenerDirector:
-    # The CDP endpoint is our own browser on 127.0.0.1: never send it through HTTP(S)_PROXY.
+    # CDP 端点位于本地 127.0.0.1 浏览器进程，绝不能经过 HTTP(S)_PROXY 代理转发。
     return urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 def cdp_version(port: int, timeout: float = 2.0) -> dict[str, Any] | None:
-    """``GET http://127.0.0.1:<port>/json/version`` or None if unreachable."""
+    """请求 ``GET http://127.0.0.1:<port>/json/version``，不可达时返回 None。"""
     try:
         with _local_opener().open(f"http://127.0.0.1:{int(port)}/json/version", timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
@@ -212,7 +210,7 @@ def cdp_version(port: int, timeout: float = 2.0) -> dict[str, Any] | None:
 
 
 def cdp_page_targets(port: int, timeout: float = 2.0) -> list[dict[str, Any]]:
-    """``GET http://127.0.0.1:<port>/json/list`` filtered to ``type == 'page'`` targets."""
+    """请求 ``GET http://127.0.0.1:<port>/json/list`` 并筛选出 ``type == 'page'`` 的页面目标列表。"""
     try:
         with _local_opener().open(f"http://127.0.0.1:{int(port)}/json/list", timeout=timeout) as resp:
             items = json.loads(resp.read().decode("utf-8"))
@@ -224,7 +222,7 @@ def cdp_page_targets(port: int, timeout: float = 2.0) -> list[dict[str, Any]]:
 
 
 def read_devtools_active_port(user_data_dir: str | Path) -> tuple[int, str] | None:
-    """Parse ``<profile>/DevToolsActivePort`` → (port, browser ws path)."""
+    """解析 ``<profile>/DevToolsActivePort`` 文件，返回 ``(端口, 浏览器 WebSocket 路径)``。"""
     try:
         lines = (Path(user_data_dir) / DEVTOOLS_ACTIVE_PORT).read_text(encoding="utf-8").splitlines()
         port = int(lines[0].strip())
@@ -235,7 +233,7 @@ def read_devtools_active_port(user_data_dir: str | Path) -> tuple[int, str] | No
 
 
 def session_alive(info: dict[str, Any] | None) -> bool:
-    """A session is alive when its CDP endpoint answers (and its pid, if known, is running)."""
+    """判断会话是否存活：其 CDP 端点可正常响应，且记录的进程 PID（若已知）仍在运行。"""
     if not info:
         return False
     port = int(info.get("port") or 0)
@@ -250,12 +248,12 @@ def session_alive(info: dict[str, Any] | None) -> bool:
     ws = str(ver.get("webSocketDebuggerUrl") or "")
     cdp_url = str(info.get("cdp_url") or "")
     if ws and cdp_url.startswith("ws") and ws.rsplit("/", 1)[-1] != cdp_url.rsplit("/", 1)[-1]:
-        return False  # a different browser now owns that port
+        return False  # 该端口当前已被另一个浏览器实例占用
     return True
 
 
 class _FileLock:
-    """Tiny cross-process lock (O_EXCL lock file with stale detection)."""
+    """轻量级跨进程文件锁（基于 O_EXCL 原子创建，支持陈旧死锁自动清理）。"""
 
     def __init__(self, path: Path, timeout: float = 60.0, stale_after: float = 120.0) -> None:
         self.path, self.timeout, self.stale_after = path, timeout, stale_after
@@ -296,7 +294,7 @@ class _FileLock:
 
 
 # ---------------------------------------------------------------------------
-# launching
+# 浏览器进程启动
 # ---------------------------------------------------------------------------
 
 
@@ -311,7 +309,7 @@ def launch_browser(
     startup_timeout: float = 30.0,
     log_path: str | Path | None = None,
 ) -> tuple[dict[str, Any], subprocess.Popen]:
-    """Start a detached Chromium-based browser and wait for its DevTools endpoint."""
+    """以分离模式启动基于 Chromium 的浏览器进程，并等待其 DevTools 调试端点就绪。"""
     udd = Path(user_data_dir).resolve()
     udd.mkdir(parents=True, exist_ok=True)
     try:
@@ -321,7 +319,7 @@ def launch_browser(
 
     if no_sandbox is None:
         env = os.environ.get(ENV_NO_SANDBOX, "").strip().lower()
-        # Playwright itself launches Chromium with --no-sandbox by default on Linux.
+        # Playwright 自身在 Linux 上默认也会附带 --no-sandbox 参数启动 Chromium。
         no_sandbox = env in ("1", "true", "yes") or (env == "" and sys.platform.startswith("linux"))
 
     args = [
@@ -387,15 +385,15 @@ def launch_browser(
 
 
 # ---------------------------------------------------------------------------
-# PersistentBrowser
+# PersistentBrowser 持久化浏览器核心类
 # ---------------------------------------------------------------------------
 
 
 class PersistentBrowser:
-    """``BrowserBackend`` over a detached, persistent Chromium/Edge process.
+    """基于分离式持久化 Chromium/Edge 进程的 ``BrowserBackend`` 实现。
 
-    Prefer :meth:`connect` to construct. Usable as a context manager (``__exit__`` →
-    :meth:`disconnect`, the browser keeps running).
+    推荐使用 :meth:`connect` 构造实例。支持作为上下文管理器使用（退出 ``__exit__`` 时调用
+    :meth:`disconnect`，仅断开连接而保持浏览器继续在后台运行）。
     """
 
     def __init__(
@@ -422,7 +420,7 @@ class PersistentBrowser:
         self.connect_timeout = connect_timeout
 
         self.session: dict[str, Any] | None = None
-        self.launched = False  # True if this object launched the browser process
+        self.launched = False  # 若由当前实例新启动了浏览器进程则为 True
         self._proc: subprocess.Popen | None = None
         self._pw: Any = None
         self._browser: Any = None
@@ -431,7 +429,7 @@ class PersistentBrowser:
         self._auto_dialog: str | None = "accept"
         self._telemetry: dict[str, Any] = self._empty_telemetry()
 
-    # ------------------------------------------------------------------ lifecycle
+    # ------------------------------------------------------------------ 生命周期管理
     @classmethod
     def connect(
         cls,
@@ -440,11 +438,11 @@ class PersistentBrowser:
         launch_if_missing: bool = True,
         **kwargs: Any,
     ) -> "PersistentBrowser":
-        """Attach to the live session in ``session_file`` or launch a new browser.
+        """连接到 ``session_file`` 记录的存活浏览器会话，若不存在则启动新浏览器。
 
-        Raises :class:`BrowserNotRunning` if there is no live session and
-        ``launch_if_missing`` is False. ``kwargs`` go to ``__init__`` (``user_data_dir``,
-        ``channel``, ``executable``, ``window_size``, ``extra_args``, ...).
+        当不存在存活会话且 ``launch_if_missing`` 为 False 时抛出 :class:`BrowserNotRunning`。
+        其余 ``kwargs`` 透传给 ``__init__``（如 ``user_data_dir``、``channel``、``executable``、
+        ``window_size``、``extra_args`` 等）。
         """
         br = cls(session_file, headless=headless, **kwargs)
         br.start(launch_if_missing=launch_if_missing)
@@ -452,7 +450,7 @@ class PersistentBrowser:
 
     @staticmethod
     def status(session_file: str | Path | None = None) -> dict[str, Any]:
-        """Session JSON plus ``alive`` flag (does not connect Playwright)."""
+        """读取会话 JSON 信息并附带 ``alive`` 存活标志（不会建立 Playwright 连接）。"""
         sf = Path(session_file) if session_file else browser_session_file()
         info = read_session(sf) or {}
         return {**info, "session_file": str(sf), "alive": session_alive(info) if info else False}
@@ -462,7 +460,7 @@ class PersistentBrowser:
         return exe
 
     def _kill_stale(self, info: dict[str, Any] | None) -> None:
-        """Kill a leftover browser of a dead session that still holds our profile."""
+        """清理失效会话遗留但仍占用当前用户数据目录的残留浏览器进程。"""
         if not info:
             return
         pid = int(info.get("pid") or 0)
@@ -490,7 +488,7 @@ class PersistentBrowser:
             with _FileLock(self.session_file.with_name(self.session_file.name + ".lock")):
                 info = read_session(self.session_file)
                 if not session_alive(info):
-                    # Profile might still be served by a browser whose session file was lost.
+                    # 会话文件可能已丢失，但占用该用户配置目录的浏览器进程或许仍在运行，尝试直接纳管。
                     adopted = self._adopt_from_profile()
                     if adopted:
                         info = adopted
@@ -525,8 +523,8 @@ class PersistentBrowser:
         except BaseException:
             self._stop_playwright()
             raise
-        # Wait for Chromium's default persistent context and open page targets BEFORE calling context()
-        # so we never accidentally create a transient incognito context via browser.new_context().
+        # 在调用 context() 前先等待 Chromium 默认持久化上下文及已打开页面目标同步完毕，
+        # 避免因上下文尚未就绪而通过 browser.new_context() 误创建临时无痕上下文。
         port = int((self.session or {}).get("port") or 0)
         expected_pages = max(1, len(cdp_page_targets(port, timeout=2.0)) if port else 1)
         sync_deadline = time.monotonic() + (5.0 if self.launched else 3.0)
@@ -555,7 +553,7 @@ class PersistentBrowser:
         return self
 
     def _pump_playwright(self, seconds: float = 0.05) -> None:
-        """Yield to Playwright's asyncio dispatcher fiber so incoming CDP target/context events are processed."""
+        """让出执行权给 Playwright 内部的 asyncio 调度协程，以便及时处理到达的 CDP 目标与上下文事件。"""
         if self._browser is not None and hasattr(self._browser, "_sync"):
             import asyncio
 
@@ -603,13 +601,13 @@ class PersistentBrowser:
             return False
 
     def disconnect(self) -> None:
-        """Drop the CDP connection (stop Playwright) but keep the browser process alive."""
+        """断开 CDP 连接（停止本地 Playwright 实例），但保持浏览器进程在后台继续存活。"""
         if self._browser is not None:
             self._remember_active_page()
         self._stop_playwright()
 
     def shutdown(self) -> None:
-        """Close the browser gracefully (CDP ``Browser.close``), kill leftovers, delete the session file."""
+        """优雅关闭浏览器（发送 CDP ``Browser.close``），清理残留进程并删除会话文件。"""
         info = self.session or read_session(self.session_file) or {}
         if self._browser is not None:
             try:
@@ -647,7 +645,7 @@ class PersistentBrowser:
     def __exit__(self, *exc: Any) -> None:
         self.disconnect()
 
-    # ------------------------------------------------------------------ pages
+    # ------------------------------------------------------------------ 页面与标签页管理
     def _require(self) -> Any:
         if self._browser is None:
             raise BrowserError("PersistentBrowser is not connected; call start()/connect() first")
@@ -655,7 +653,7 @@ class PersistentBrowser:
 
     @property
     def playwright_browser(self) -> Any:
-        """The underlying Playwright ``Browser`` (CDP connection)."""
+        """底层连接的 Playwright ``Browser`` 实例（基于 CDP）。"""
         return self._require()
 
     def context(self) -> Any:
@@ -684,7 +682,7 @@ class PersistentBrowser:
             self._active = page
             return
 
-        # Delayed startup blank tab or popup still at blank URL: only promote if it navigates to a real URL.
+        # 延迟创建的启动空白页或仍处于空白 URL 的弹窗：仅在其真正导航到有效 URL 时才提升为活动页面。
         def _promote_on_nav(frame: Any) -> None:
             try:
                 if not page.is_closed() and frame == page.main_frame and str(frame.url or "") not in _BLANK_URLS:
@@ -722,7 +720,7 @@ class PersistentBrowser:
         return snap
 
     def set_dialog_policy(self, policy: str | None) -> None:
-        """``"accept"`` (default), ``"dismiss"``, or ``None`` (leave dialogs to step code)."""
+        """设置弹窗处理策略：``"accept"``（默认自动确认）、``"dismiss"``（自动取消）或 ``None``（交由步骤代码自行处理）。"""
         if policy not in ("accept", "dismiss", None):
             raise ValueError(f"invalid dialog policy {policy!r}")
         self._auto_dialog = policy
@@ -787,7 +785,7 @@ class PersistentBrowser:
                 elif self._auto_dialog == "dismiss":
                     dialog.dismiss()
                     entry["handled"] = True
-            except Exception:  # noqa: BLE001 - already handled by step code
+            except Exception:  # noqa: BLE001 - 弹窗已被步骤代码先行处理
                 pass
             buf = self._telemetry["dialogs"]
             if len(buf) < 20:
@@ -803,7 +801,7 @@ class PersistentBrowser:
             pass
 
     def set_active(self, page: Any) -> Any:
-        """Mark ``page`` as the one :meth:`page` returns (also brings it to front)."""
+        """将 ``page`` 标记为 :meth:`page` 返回的当前活动页面（同时将其置顶显示）。"""
         self._attach_page_monitors(page)
         self._active = page
         try:
@@ -813,7 +811,7 @@ class PersistentBrowser:
         return page
 
     def page(self) -> Any:
-        """Most recently active non-closed page of the default context (creates one if none)."""
+        """返回默认上下文中最近活动的未关闭页面（若无任何页面则自动新建一个）。"""
         if self._active is not None and not self._active.is_closed():
             self._attach_page_monitors(self._active)
             return self._active
@@ -875,9 +873,9 @@ class PersistentBrowser:
         except Exception:  # noqa: BLE001
             pass
 
-    # ------------------------------------------------------------------ long-run hygiene & helpers
+    # ------------------------------------------------------------------ 长程运行资源维护与辅助方法
     def prune_tabs(self, keep_max: int = 6) -> int:
-        """Close excess background/blank tabs so long-horizon runs do not leak memory."""
+        """关闭多余的后台或空白标签页，防止长程任务运行期间发生内存泄漏。"""
         if not self.is_connected():
             return 0
         pages = self.pages()
@@ -885,7 +883,7 @@ class PersistentBrowser:
             return 0
         active = self.page()
         closed = 0
-        # First close background blank tabs, then oldest non-active tabs.
+        # 优先关闭后台空白标签页，其次按时间顺序关闭最早打开的非活动标签页。
         candidates = [p for p in pages if p is not active and p.url in _BLANK_URLS] + [
             p for p in pages if p is not active and p.url not in _BLANK_URLS
         ]
@@ -900,7 +898,7 @@ class PersistentBrowser:
         return closed
 
     def wait_stable(self, page: Any | None = None, timeout: float = 10.0, idle_ms: int = 250) -> None:
-        """Wait for DOM readiness + brief network/layout settle without hanging on long-polling."""
+        """等待 DOM 加载就绪及短暂的网络与布局稳定，同时避免被长轮询请求永久阻塞。"""
         p = page or self.page()
         try:
             p.wait_for_load_state("domcontentloaded", timeout=int(timeout * 1000))
@@ -917,7 +915,7 @@ class PersistentBrowser:
                 time.sleep(idle_ms / 1000.0)
 
     def dismiss_overlays(self, page: Any | None = None) -> list[str]:
-        """Safely dismiss common cookie banners or closeable modal overlays (never touches CAPTCHAs)."""
+        """安全关闭常见的 Cookie 提示横幅或可关闭的模态遮罩层（绝不触碰 CAPTCHA 验证码）。"""
         p = page or self.page()
         health = self.page_health(p)
         if health.get("captcha_detected"):
@@ -962,7 +960,7 @@ class PersistentBrowser:
         return dismissed
 
     def extract_table(self, selector: str = "table", page: Any | None = None, max_rows: int = 500) -> list[dict[str, str]]:
-        """Extract an HTML table into a list of row dicts keyed by header names."""
+        """将页面中的 HTML 表格提取为以表头名称为键的行字典列表。"""
         p = page or self.page()
         js = """([sel, limit]) => {
             const tbl = document.querySelector(sel);
@@ -987,7 +985,7 @@ class PersistentBrowser:
         return res if isinstance(res, list) else []
 
     def extract_links(self, selector: str = "a[href]", page: Any | None = None, limit: int = 200) -> list[dict[str, str]]:
-        """Extract visible/matching anchor links with resolved absolute URLs."""
+        """提取匹配的超链接元素及其解析后的绝对 URL 列表。"""
         p = page or self.page()
         js = """([sel, lim]) => Array.from(document.querySelectorAll(sel)).slice(0, lim).map(a => ({
             text: (a.innerText || a.getAttribute('aria-label') || '').trim(),
@@ -997,7 +995,7 @@ class PersistentBrowser:
         return res if isinstance(res, list) else []
 
     def page_health(self, page: Any | None = None) -> dict[str, Any]:
-        """Zero-token DOM health & safety probe (error pages, alerts, login walls, passive CAPTCHA check)."""
+        """零 Token 开销的页面 DOM 健康度与安全探针（检测错误页、告警提示、登录墙及被动式 CAPTCHA 检测）。"""
         p = page or self.page()
         url = ""
         try:
@@ -1025,7 +1023,7 @@ class PersistentBrowser:
             };
             const title = document.title || '';
             const bodyText = (document.body ? (document.body.innerText || '') : '').trim();
-            // Passive CAPTCHA / anti-bot gate detection ONLY so the supervisor can stop & escalate safely.
+            // 仅做被动式 CAPTCHA / 反爬人机验证门禁检测，以便监督器安全停止并升级人工处理。
             const iframes = Array.from(document.querySelectorAll('iframe')).filter(visible);
             const captchaFrame = iframes.some(f => {
                 const src = (f.src || '').toLowerCase();
@@ -1081,7 +1079,7 @@ class PersistentBrowser:
                     "captcha_detected": False, "login_wall_detected": False, "alerts": []}
         return {"url": url, "is_error_page": False, "captcha_detected": False, "login_wall_detected": False, "alerts": []}
 
-    # ------------------------------------------------------------------ observation
+    # ------------------------------------------------------------------ 页面观测与截图
     def aria_snapshot(self, page: Any | None = None, max_chars: int = 12000) -> str:
         p = page or self.page()
         try:

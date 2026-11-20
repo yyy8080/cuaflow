@@ -42,7 +42,7 @@ export function Card({ title, actions, children, className }: { title?: ReactNod
   );
 }
 
-/** Artifact screenshot; click to open a full-size lightbox. */
+/** 运行产物截图组件，点击可打开全尺寸灯箱预览。 */
 export function Screenshot({ runId, path, thumb, alt = '截图' }: { runId: string; path?: string; thumb?: boolean; alt?: string }) {
   const [open, setOpen] = useState(false);
   const [failed, setFailed] = useState(false);

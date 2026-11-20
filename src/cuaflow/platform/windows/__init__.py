@@ -1,7 +1,7 @@
-"""Windows desktop backend. Importable on any OS; constructing ``WindowsDesktop`` requires Windows.
+"""Windows 原生桌面后端。可在任意操作系统上安全导入；实例化 ``WindowsDesktop`` 则需要 Windows 环境。
 
-Optional dependencies (``pip install 'cuaflow[win]'``): pywinauto, uiautomation, pyautogui, pywin32.
-``psutil`` is used for process names when present.
+可选依赖（``pip install 'cuaflow[win]'``）：pywinauto、uiautomation、pyautogui、pywin32。
+若已安装 ``psutil``，将优先用于解析进程名称。
 """
 
 from cuaflow.platform.windows.apps import (

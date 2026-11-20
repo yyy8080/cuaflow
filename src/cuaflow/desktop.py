@@ -1,4 +1,4 @@
-"""Standalone desktop launcher for installed cuaflow builds (starts local server, opens browser, shows control window)."""
+"""面向已安装 cuaflow 发行版的独立桌面启动器（启动本地服务、打开浏览器并展示桌面控制窗口）。"""
 
 from __future__ import annotations
 
@@ -205,7 +205,7 @@ def main(argv: list[str] | None = None) -> int:
         token = tok_file.read_text(encoding="utf-8").strip() if tok_file.is_file() else secrets.token_urlsafe(24)
         tok_file.write_text(token, encoding="utf-8")
 
-    # Reuse already running local cuaflow instance if alive
+    # 若本地已有正在运行的 cuaflow 实例，则直接复用
     existing_port = args.port
     if info_file.is_file():
         try:

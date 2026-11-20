@@ -1,4 +1,4 @@
-"""Tools shared by Author, Repairer, Fallback and Planner, plus StepVerifier (Supervisor L0/L1/L1.5/L2 checks)."""
+"""供 `Author`、`Repairer`、`FallbackAgent` 与 `MissionPlanner` 共用的工具集，以及 `StepVerifier`（`Supervisor` L0/L1/L1.5/L2 分级校验）。"""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ def check(level: str, passed: bool, detail: str) -> dict[str, Any]:
 
 
 class StepVerifier:
-    """Turns a raw runner step result into Supervisor checks (L0 -> L1 -> L1.5 Sentinel -> L2 Judge)."""
+    """将运行器返回的原始步骤结果转化为 `Supervisor` 分级校验项（L0 -> L1 -> L1.5 哨兵 -> L2 评审）。"""
 
     def __init__(self, judge_llm: LLM | None, run_dir: Path, intent: str = "",
                  l15_enabled: bool = True, adaptive_l2: bool = True):
@@ -58,7 +58,7 @@ class StepVerifier:
             return False, checks
         checks.append(check("L0", True, f"completed in {result.get('duration_ms', 0)} ms"))
         if result.get("error_kind") == "expectation":
-            # Even when an expectation failed, inspect whether CAPTCHA gated the page so we don't try to bypass it.
+            # 即便断言失败，也先检查页面是否被 CAPTCHA 拦截，避免尝试绕过人机验证。
             sr = inspect_step(step, result)
             self.last_sentinel = sr
             if sr.blocker_kind == "captcha":
@@ -145,7 +145,7 @@ def shot_path(run_dir: Path, rel: str | None) -> list[str]:
 
 
 class RunnerGuard:
-    """Wraps runner calls; restarts a dead / hung runner from the last checkpoint."""
+    """封装运行器调用；当运行器崩溃或卡死时从最近一次检查点自动重启恢复。"""
 
     def __init__(self, runner: RunnerClient, run_dir: Path):
         self.runner = runner

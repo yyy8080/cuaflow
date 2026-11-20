@@ -1,4 +1,4 @@
-"""Tests for LocalShell and the command safety blocklist."""
+"""针对 LocalShell 本地命令执行器与危险命令安全拦截列表的测试。"""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ def test_unicode_round_trip():
     r = LocalShell().run("printf '%s\\n' '中文 测试 ✓'")
     assert r.ok
     assert r.stdout.strip() == "中文 测试 ✓"
-    # invalid UTF-8 is replaced, not raised
+    # 非法 UTF-8 字节会被替换为占位符，而非抛出解码异常
     r = LocalShell().run("printf '\\xff\\xfe ok'")
     assert "ok" in r.stdout and "\ufffd" in r.stdout
 
@@ -48,7 +48,7 @@ def test_unicode_round_trip():
 @posix_only
 def test_timeout_kills_process_tree(tmp_path):
     marker = tmp_path / "child_survived"
-    # background grandchild would create the marker after 3s if not killed with the group
+    # 若未随进程组一并终止，后台孙进程会在 3 秒后创建标记文件
     cmd = f"(sleep 3; touch {marker}) & sleep 30"
     t0 = time.monotonic()
     r = LocalShell().run(cmd, timeout=1)
@@ -135,7 +135,7 @@ def test_safe_commands_not_blocked(cmd):
 def test_custom_patterns_case_insensitive():
     assert check_command_safety("DROP TABLE users", [r"drop\s+table"]) == r"drop\s+table"
     assert check_command_safety("select 1", [r"drop\s+table"]) is None
-    # invalid regex falls back to substring match
+    # 无效正则表达式会自动回退为普通子串匹配
     assert check_command_safety("a ( b", ["("]) == "("
 
 
@@ -144,7 +144,7 @@ def test_blocked_command_not_executed(tmp_path):
     r = sh.run("rm -rf / ; echo ran")
     assert r.exit_code == BLOCKED_EXIT_CODE
     assert "blocked" in r.stderr and not r.stdout
-    # disabled blocklist
+    # 禁用安全拦截列表
     assert LocalShell(blocked_patterns=[]).check("rm -rf /") is None
 
 

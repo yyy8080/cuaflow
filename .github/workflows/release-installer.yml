@@ -61,7 +61,7 @@ jobs:
             }
           }
 
-          # 1. Verify standalone CLI runs outside repository tree
+          # 1. 验证独立 CLI 可在代码仓库目录之外正常运行
           Push-Location "C:\Windows\Temp"
           try {
             & "C:\cuaflow-installed\cuaflow.exe" --help | Out-Null
@@ -70,7 +70,7 @@ jobs:
             Pop-Location
           }
 
-          # 2. Verify frozen --runner-proc executes a real Flow step and discovers Windows Edge without playwright chromium
+          # 2. 验证打包后的 --runner-proc 可执行真实 Flow 步骤，并在未安装 Playwright Chromium 时自动发现系统 Edge
           New-Item -ItemType Directory -Force -Path "C:\cuaflow-smoke" | Out-Null
           $smokeLines = @(
             'from cuaflow.flow import Ctx, Flow, expect',
@@ -90,7 +90,7 @@ jobs:
             throw "Standalone flow execution failed: $runOut"
           }
 
-          # 3. Verify windowless cuaflow-desktop.exe serves REST API + bundled Web Console SPA
+          # 3. 验证无窗口模式下的 cuaflow-desktop.exe 可正常提供 REST API 与内置 Web 控制台单页应用
           $env:CUAFLOW_DATA_DIR = "C:\cuaflow-smoke\data"
           $srv = Start-Process -FilePath "C:\cuaflow-installed\cuaflow-desktop.exe" -ArgumentList '--no-gui','--no-browser','--port','18765','--token','smoketoken' -PassThru
           try {

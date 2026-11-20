@@ -1,11 +1,10 @@
-"""Cross-platform command execution (``ShellBackend``).
+"""跨平台命令执行后端（``ShellBackend`` 实现）。
 
-* Windows: Windows PowerShell (``powershell.exe``) or PowerShell 7 (``pwsh``), UTF-8 forced.
-* elsewhere: ``/bin/bash -lc``.
+* Windows：使用 Windows PowerShell（``powershell.exe``）或 PowerShell 7（``pwsh``），强制启用 UTF-8 编码。
+* 其他系统：使用 ``/bin/bash -lc``。
 
-Timeouts kill the whole process tree. Output is decoded as UTF-8 with ``errors="replace"``.
-A configurable regex blocklist (:data:`DEFAULT_BLOCKED_PATTERNS`) refuses obviously
-destructive commands before they are started.
+命令超时会终止整个进程树；标准输出与错误流均以 UTF-8（``errors="replace"``）解码。
+内置可配置的正则黑名单（:data:`DEFAULT_BLOCKED_PATTERNS`），在启动前拦截明显具有破坏性的高危命令。
 """
 
 from __future__ import annotations
@@ -20,14 +19,14 @@ from pathlib import Path
 from cuaflow.platform._proc import CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW, IS_WINDOWS, kill_tree
 from cuaflow.platform.base import ShellResult
 
-ENV_SHELL = "CUAFLOW_SHELL"  # "powershell" | "pwsh" | "bash" | "sh" | "cmd" | absolute path
+ENV_SHELL = "CUAFLOW_SHELL"  # 可选值："powershell" | "pwsh" | "bash" | "sh" | "cmd" 或可执行文件绝对路径
 
 POWERSHELL_FLAGS = ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass"]
 POWERSHELL_UTF8_PREFIX = (
     "[Console]::OutputEncoding=[Text.Encoding]::UTF8; $OutputEncoding=[Text.Encoding]::UTF8; "
     "$ProgressPreference='SilentlyContinue';"
 )
-# Propagate failure of the last statement / native exit code as the process exit code.
+# 将最后一条语句的执行失败状态或原生进程退出码传递为 PowerShell 进程退出码。
 _POWERSHELL_EXIT_SUFFIX = (
     "\nif (-not $?) { if ($LASTEXITCODE) { exit $LASTEXITCODE } else { exit 1 } }"
 )
@@ -35,12 +34,12 @@ _POWERSHELL_EXIT_SUFFIX = (
 BLOCKED_EXIT_CODE = 126
 TIMEOUT_EXIT_CODE = 124
 
-_SEP = r"(?=\s|$|[;&|)'\"])"  # end of a token
+_SEP = r"(?=\s|$|[;&|)'\"])"  # 词元结束边界匹配
 _DEL = r"(?:remove-item|ri|rm|rmdir|rd|del|erase)"
 
-#: Case-insensitive regexes for commands that are refused by default.
+#: 默认拦截的高危命令正则表达式列表（忽略大小写）。
 DEFAULT_BLOCKED_PATTERNS: list[str] = [
-    # disks / volumes / partitions
+    # 磁盘 / 卷 / 分区破坏操作
     r"\bformat-volume\b",
     r"\b(?:clear-disk|initialize-disk|remove-partition)\b",
     r"\bformat(?:\.com)?\s+['\"]?[a-z]:",
@@ -48,29 +47,29 @@ DEFAULT_BLOCKED_PATTERNS: list[str] = [
     r"\bmkfs(?:\.\w+)?\b",
     r"\bdd\b[^\n;|&]*\bof=/dev/(?!null\b|zero\b|stdout\b|stderr\b)",
     r"\bwipefs\b",
-    # recursive deletion of filesystem roots / home / system dirs
+    # 递归删除文件系统根目录 / 用户主目录 / 系统关键目录
     r"\brm\s+(?:-{1,2}[\w-]+\s+)*['\"]?(?:/\*?|~/?|\$home/?|/(?:bin|boot|etc|lib|lib64|usr|var|home|root)/?)['\"]?" + _SEP,
     rf"\b{_DEL}\b[^\n;|&]*?\s(?:-(?:literal)?path\s+)?['\"]?[a-z]:\\?\*?(?:\.\*)?['\"]?{_SEP}",
     rf"\b{_DEL}\b[^\n;|&]*?\$env:systemdrive\\?\*?['\"]?{_SEP}",
     rf"\b{_DEL}\b[^\n;|&]*?[a-z]:\\(?:windows|users|program files(?: \(x86\))?)(?:\\system32)?\\?\*?['\"]?{_SEP}",
-    # boot config / registry / shadow copies / secure wipe
+    # 启动配置 / 注册表 / 卷影副本 / 磁盘安全擦除
     r"\bbcdedit\b",
     r"\breg(?:\.exe)?\s+delete\s+['\"]?(?:hklm|hkey_local_machine)\b",
     r"\bremove-item\b[^\n;|&]*\b(?:hklm|registry::hkey_local_machine):",
     r"\bvssadmin(?:\.exe)?\s+delete\s+shadows\b",
     r"\bwmic\b[^\n]*\bshadowcopy\s+delete\b",
     r"\bcipher(?:\.exe)?\s+/w\b",
-    # power state
+    # 系统电源状态（关机 / 重启）
     r"(?:^|[\s;&|(])shutdown(?:\.exe)?(?:\s+[/-]|\s*$|\s*[;&|)])",
     r"\b(?:restart|stop)-computer\b",
     r"(?:^|[\s;&|(])(?:reboot|poweroff|halt)(?:\s|$|[;&|)])",
-    # fork bomb
+    # Fork 炸弹
     r":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:",
 ]
 
 
 def check_command_safety(command: str, patterns: list[str]) -> str | None:
-    """Return the first pattern (case-insensitive regex) matching ``command``, else ``None``."""
+    """返回 ``command`` 命中的第一条黑名单正则模式（忽略大小写），未命中则返回 ``None``。"""
     for pat in patterns:
         try:
             if re.search(pat, command, flags=re.IGNORECASE | re.MULTILINE):
@@ -91,7 +90,7 @@ def _decode(data: bytes | None) -> str:
 
 
 def _decode_clixml(text: str) -> str:
-    """Turn PowerShell's ``#< CLIXML`` stderr serialization back into plain text."""
+    """将 PowerShell 标准错误输出中的 ``#< CLIXML`` XML 序列化内容还原为纯文本。"""
     if not text.lstrip().startswith("#< CLIXML"):
         return text
     parts = re.findall(r'<S S="Error">(.*?)</S>', text, flags=re.DOTALL)
@@ -105,20 +104,20 @@ def _decode_clixml(text: str) -> str:
 
 
 class LocalShell:
-    """Run shell commands on the local host.
+    """在本地主机上执行 Shell 命令。
 
-    Args:
-        shell: ``"powershell"`` (Windows default), ``"pwsh"``, ``"bash"`` (POSIX default),
-            ``"sh"``, ``"cmd"`` or an executable path. Defaults to ``$CUAFLOW_SHELL``.
-        cwd: default working directory.
-        env: extra environment variables applied to every command.
-        blocked_patterns: regex blocklist; ``None`` → :data:`DEFAULT_BLOCKED_PATTERNS`,
-            ``[]`` disables the check. Blocked commands are not run and return
-            ``ShellResult(exit_code=126, stderr="cuaflow: command blocked ...")``.
+    参数：
+        shell: 可取 ``"powershell"``（Windows 默认）、``"pwsh"``、``"bash"``（POSIX 默认）、
+            ``"sh"``、``"cmd"`` 或可执行文件路径。默认优先读取环境变量 ``$CUAFLOW_SHELL``。
+        cwd: 默认工作目录。
+        env: 注入到每次命令执行环境中的附加环境变量。
+        blocked_patterns: 命令黑名单正则列表；``None`` 表示使用 :data:`DEFAULT_BLOCKED_PATTERNS`，
+            空列表 ``[]`` 表示禁用安全拦截。被拦截的命令不会启动，直接返回
+            ``ShellResult(exit_code=126, stderr="cuaflow: command blocked ...")``。
 
-    Note: on Windows the command is passed with ``-EncodedCommand`` (base64 UTF-16LE of the
-    UTF-8 prefix + command) instead of ``-Command`` to avoid all command-line quoting problems;
-    semantics are otherwise identical to ``-Command``.
+    注意：在 Windows 下使用 PowerShell 时，命令会拼接 UTF-8 编码前缀与退出码后缀后编码为
+    UTF-16LE Base64，并通过 ``-EncodedCommand`` 传递而非 ``-Command``，以彻底规避命令行引号转义问题；
+    执行语义与 ``-Command`` 完全一致。
     """
 
     def __init__(
@@ -135,7 +134,7 @@ class LocalShell:
 
     # ------------------------------------------------------------------
     def argv(self, command: str) -> list[str]:
-        """The argv used to execute ``command`` with the configured shell."""
+        """构造使用当前配置的 Shell 执行 ``command`` 所需的参数列表 argv。"""
         kind = Path(self.shell).name.lower()
         if kind.endswith(".exe"):
             kind = kind[:-4]
@@ -157,7 +156,7 @@ class LocalShell:
         return [self.shell, "-c", command]
 
     def check(self, command: str) -> str | None:
-        """Matched blocklist pattern for ``command`` (or None)."""
+        """检查 ``command`` 是否命中安全黑名单，返回命中的正则模式或 ``None``。"""
         return check_command_safety(command, self.blocked_patterns) if self.blocked_patterns else None
 
     def run(
@@ -217,7 +216,7 @@ class LocalShell:
             try:
                 out, err = proc.communicate(timeout=5)
             except subprocess.TimeoutExpired:
-                # A detached grandchild still holds the pipes; give up on the remaining output.
+                # 分离的孙进程仍持有标准流管道句柄；放弃等待剩余输出并主动关闭流。
                 for stream in (proc.stdout, proc.stderr):
                     try:
                         stream and stream.close()

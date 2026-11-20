@@ -1,4 +1,4 @@
-"""Tests for the ``cuaflow-tool`` typer app."""
+"""针对 ``cuaflow-tool`` Typer 命令行应用的测试。"""
 
 from __future__ import annotations
 

@@ -1,6 +1,6 @@
-"""Keyboard / mouse input: pywinauto (SendInput, Unicode-safe) with pyautogui fallback.
+"""键盘与鼠标输入封装：优先使用 pywinauto（基于 SendInput，原生支持 Unicode），不可用时回退至 pyautogui。
 
-All coordinates are physical screen pixels (the process is made per-monitor DPI aware).
+所有坐标均为物理屏幕像素（调用前会自动启用进程级每显示器 DPI 感知）。
 """
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ from cuaflow.platform.windows import _win32
 
 _SPECIAL = set("+^%~(){}[]")
 
-# friendly key name -> pywinauto virtual key name
+# 常用按键别名 -> pywinauto 虚拟键名映射
 _KEYMAP = {
     "ctrl": "VK_CONTROL", "control": "VK_CONTROL", "alt": "VK_MENU", "menu": "VK_MENU",
     "shift": "VK_SHIFT", "win": "VK_LWIN", "windows": "VK_LWIN", "cmd": "VK_LWIN", "super": "VK_LWIN",
@@ -23,12 +23,12 @@ _KEYMAP = {
 
 
 def escape_send_keys(text: str) -> str:
-    """Escape pywinauto ``send_keys`` metacharacters so ``text`` is typed literally."""
+    """转义 pywinauto ``send_keys`` 的特殊元字符，确保 ``text`` 按原样字面输入。"""
     return "".join("{" + ch + "}" if ch in _SPECIAL else ch for ch in text)
 
 
 def hotkey_to_send_keys(*keys: str) -> str:
-    """``("ctrl", "shift", "s")`` → ``"{VK_CONTROL down}{VK_SHIFT down}{s down}{s up}{VK_SHIFT up}{VK_CONTROL up}"``."""
+    """将组合键序列如 ``("ctrl", "shift", "s")`` 转换为 pywinauto 按下/抬起序列 ``"{VK_CONTROL down}{VK_SHIFT down}{s down}{s up}{VK_SHIFT up}{VK_CONTROL up}"``。"""
     names: list[str] = []
     for k in keys:
         low = k.strip().lower()
@@ -46,7 +46,7 @@ def hotkey_to_send_keys(*keys: str) -> str:
 
 
 def type_text(text: str, interval: float = 0.0) -> None:
-    """Type literal ``text`` (Unicode incl. CJK) into the focused control."""
+    """向当前焦点控件按字面输入文本 ``text``（支持包括中日韩字符在内的 Unicode）。"""
     _win32.ensure_dpi_awareness()
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     try:
@@ -66,7 +66,7 @@ def type_text(text: str, interval: float = 0.0) -> None:
 
 
 def send_keys(keys: str) -> None:
-    """pywinauto key syntax, e.g. ``"^s"``, ``"{ENTER}"``, ``"%{F4}"``."""
+    """按 pywinauto 按键语法发送按键，例如 ``"^s"``、``"{ENTER}"``、``"%{F4}"``。"""
     _win32.ensure_dpi_awareness()
     from pywinauto import keyboard  # type: ignore
 
@@ -105,7 +105,7 @@ def click(x: int, y: int, button: str = "left", double: bool = False) -> None:
 
 
 def scroll(x: int, y: int, clicks: int) -> None:
-    """Positive ``clicks`` scrolls up, negative down."""
+    """在指定位置滚动鼠标滚轮：``clicks`` 为正数时向上滚动，为负数时向下滚动。"""
     _win32.ensure_dpi_awareness()
     try:
         from pywinauto import mouse  # type: ignore

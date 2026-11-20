@@ -9,8 +9,8 @@ export type AsyncState<T> = {
 };
 
 /**
- * Load data with `fn`, optionally re-polling every `intervalMs` (polling pauses while the tab
- * is hidden). `deps` changes trigger an immediate reload.
+ * 使用 `fn` 异步加载数据，可选按 `intervalMs` 间隔定时轮询（标签页隐藏时暂停轮询）；
+ * `deps` 变化时会立即重新加载。
  */
 export function useAsync<T>(fn: () => Promise<T>, deps: unknown[], intervalMs?: number): AsyncState<T> {
   const [data, setData] = useState<T>();
@@ -49,7 +49,7 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[], intervalMs?: 
   return { data, error, loading, reload, setData };
 }
 
-/** Returns a debounced version of `fn` (trailing edge). */
+/** 返回 `fn` 的防抖包装函数（延迟尾部触发）。 */
 export function useDebounced(fn: () => void, ms: number): () => void {
   const fnRef = useRef(fn);
   fnRef.current = fn;
@@ -66,7 +66,7 @@ export function useDebounced(fn: () => void, ms: number): () => void {
   }, [ms]);
 }
 
-/** Re-render every `ms` (for live durations). */
+/** 每隔 `ms` 毫秒触发一次组件重渲染（用于实时刷新耗时显示）。 */
 export function useTick(ms: number, enabled = true): number {
   const [n, setN] = useState(0);
   useEffect(() => {

@@ -1,4 +1,4 @@
-"""Event bus: persists events and fans them out to subscribers (WebSocket, CLI printer, tests)."""
+"""事件总线：持久化事件并将其扇出广播给各订阅者（WebSocket、CLI 输出、测试）。"""
 
 from __future__ import annotations
 
@@ -46,6 +46,6 @@ class EventBus:
         for fn in subs:
             try:
                 fn(ev)
-            except Exception:  # noqa: BLE001 - never let a subscriber break the producer
+            except Exception:  # noqa: BLE001 - 绝不能因订阅者异常中断事件发布方
                 pass
         return ev

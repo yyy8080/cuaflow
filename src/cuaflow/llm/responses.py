@@ -1,6 +1,6 @@
-"""OpenAI Responses API backend (kept from upstream CUAWright for GPT reasoning models).
+"""OpenAI Responses API 后端（保留自上游 CUAWright，用于 GPT 推理模型）。
 
-Translates the internal Chat-Completions-style messages to Responses ``input`` items.
+将内部 Chat Completions 风格的消息转换为 Responses 接口所需的 ``input`` 项。
 """
 
 from __future__ import annotations

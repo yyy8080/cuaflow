@@ -1,4 +1,4 @@
-"""Tests for desktop launcher, direct API key masking, browser auto-fallback, and frozen --runner-proc dispatch."""
+"""针对桌面启动器、API Key 脱敏保存、系统浏览器自动回退以及打包态 --runner-proc 子进程分发的测试。"""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def test_settings_direct_api_key_masked_and_preserved(tmp_path: Path):
     client = TestClient(create_app(svc, token="t1"))
     headers = {"Authorization": "Bearer t1"}
 
-    # Save direct API key via PUT /api/settings
+    # 通过 PUT /api/settings 直接保存明文 API Key
     r1 = client.put(
         "/api/settings",
         headers=headers,
@@ -51,10 +51,10 @@ def test_settings_direct_api_key_masked_and_preserved(tmp_path: Path):
     assert masked == f"{MASK_PREFIX}abcd"
     assert "sk-secret" not in r1.text
 
-    # Underlying saved settings hold the real key for LLM calls
+    # 底层落盘配置中保留真实密钥以供大模型调用
     assert svc.get_settings().models.default.resolved_api_key() == "sk-secret-1234567890abcd"
 
-    # Submitting masked value back preserves real key on disk
+    # 回传脱敏后的掩码值时，磁盘上的真实密钥保持不变
     cur_payload = client.get("/api/settings", headers=headers).json()
     cur_payload["supervisor"]["unattended"] = True
     r2 = client.put("/api/settings", headers=headers, json=cur_payload)
@@ -62,7 +62,7 @@ def test_settings_direct_api_key_masked_and_preserved(tmp_path: Path):
     assert svc.get_settings().models.default.api_key == "sk-secret-1234567890abcd"
     assert svc.get_settings().supervisor.unattended is True
 
-    # Clearing api_key clears it on disk
+    # 清空 api_key 字段时会同步清空磁盘上的密钥
     cur_payload["models"]["default"]["api_key"] = ""
     r3 = client.put("/api/settings", headers=headers, json=cur_payload)
     assert r3.status_code == 200
@@ -126,7 +126,7 @@ def test_desktop_launcher_headless_lifecycle_and_single_instance_reuse(monkeypat
     opened_urls: list[str] = []
     monkeypatch.setattr("webbrowser.open", lambda u: opened_urls.append(u) or True)
 
-    # Start headless desktop launcher in background thread, then verify health + single-instance reuse
+    # 在后台线程启动无界面桌面启动器，验证健康检查与单实例复用逻辑
     import uvicorn
 
     created_servers: list[uvicorn.Server] = []
@@ -158,7 +158,7 @@ def test_desktop_launcher_headless_lifecycle_and_single_instance_reuse(monkeypat
             time.sleep(0.1)
     assert healthy, "desktop server failed to start"
 
-    # Second launch on the same port detects running server, opens browser with token, and returns 0 immediately!
+    # 在同一端口二次启动时会检测到已运行的服务端，直接携带令牌打开浏览器并立即返回 0！
     rc2 = desktop_main(["--port", str(port), "--token", "dtoken", "--no-gui"])
     assert rc2 == 0
     assert opened_urls == [f"http://127.0.0.1:{port}/?token=dtoken"]

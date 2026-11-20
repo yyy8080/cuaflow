@@ -1,6 +1,6 @@
-"""End-to-end real-Chromium tests for long-horizon autonomous mission planning, batch skill compilation,
-token savings, browser hygiene (JS dialogs + tab pruning), L1.5 Sentinel + Tier-2 Fallback recovery,
-and checkpoint resume."""
+"""基于真实 Chromium 的端到端测试：覆盖长程任务自主规划、批处理技能编译、
+Token 节省统计、浏览器环境自洁（JS 弹窗与多余标签页清理）、L1.5 哨兵 + 二级兜底恢复
+以及检查点断点续跑。"""
 
 from __future__ import annotations
 
@@ -137,11 +137,11 @@ def start_portal(state: PortalState):
                     self._html("not found", 404)
                     return
                 idx = int(oid.split("-")[1]) - 101
-                # ORD-103 triggers a JS alert + stray popup tab to test browser hygiene!
+                # ORD-103 触发 JS alert 弹窗与多余新标签页，用于测试浏览器环境自洁能力！
                 quirk_js = ""
                 if oid == "ORD-103":
                     quirk_js = "<script>window.open('about:blank'); alert('库存提醒: ORD-103');</script>"
-                # ORD-104+ switches to v2 UI: blocking cookie overlay + button renamed "确认核验"
+                # ORD-104 及之后切换为 v2 界面：增加遮挡式隐私弹窗，并将按钮改名为“确认核验”
                 btn_label = "核验通过" if idx < 3 else "确认核验"
                 overlay = ""
                 if idx >= 3:
@@ -321,7 +321,7 @@ def test_long_horizon_paginated_batch_mission_saves_tokens_and_self_heals(tmp_pa
         )
         svc.update_settings(s)
 
-        # Long-horizon instruction automatically routes to MissionPlanner!
+        # 长程任务指令会自动路由至任务规划器（MissionPlanner）！
         task = svc.orchestrator.submit_task(
             "登录后台，遍历所有页收集订单链接，逐个打开订单完成核验并汇总总金额",
             start_url=f"{base_url}/login",
@@ -330,20 +330,20 @@ def test_long_horizon_paginated_batch_mission_saves_tokens_and_self_heals(tmp_pa
         task = svc.orchestrator.process_task(task["id"], unattended=True)
         assert task["status"] == "succeeded", task
         assert state.verified == {o["id"] for o in ORDERS}
-        assert len(author_llm.calls) == 4  # Author compiled ONLY ONCE (item 0), NOT 6 times!
+        assert len(author_llm.calls) == 4  # 录制者仅在第 0 项编译 1 次脚本，而非重复录制 6 次！
 
         flows = svc.store.list_flows()
         assert len(flows) == 1
         compiled = flows[0]
-        assert compiled["current_version"] == 2  # v1 auto-healed to v2 on ORD-104!
+        assert compiled["current_version"] == 2  # 在处理 ORD-104 时由 v1 自动自愈升级至 v2！
 
         usage = task["usage"]
-        # 5 items ran via compiled script * 2 steps/item (minus 1 step repaired on ORD-104) >= 9 zero-exploration script steps!
+        # 其余 5 项通过已编译脚本执行 * 每项 2 步（减去 ORD-104 修复重跑的 1 步）>= 9 个零探索脚本步骤！
         assert usage["script_steps"] >= 9
         assert usage["estimated_tokens_saved"] >= 9 * 1800
         assert task["checkpoint"]["mission_state"]["total_amount"] == 2100
 
-        # Verify leaked popup tab from ORD-103 was pruned automatically
+        # 验证 ORD-103 遗留的弹窗标签页已被自动清理
         from cuaflow.platform.browser import PersistentBrowser
 
         with PersistentBrowser.connect(session_file=session_file, headless=True) as br:
@@ -358,7 +358,7 @@ def test_browser_sentinel_catches_500_and_expired_session_recovered_by_fallback(
     state.require_login_for_dash = False
     srv, base_url = start_portal(state)
     try:
-        # Naive flow: step 1 navigates without text assertion, step 2 reads #metric if present
+        # 朴素流程：第 1 步仅导航而不做文本断言，第 2 步读取页面上的 #metric
         flow_src = textwrap.dedent(f'''
             from cuaflow.flow import Ctx, Flow, expect
 
@@ -385,7 +385,7 @@ def test_browser_sentinel_catches_500_and_expired_session_recovered_by_fallback(
                 return {"passed": False, "reason": "Redirected to login page due to expired session"}
             return {"passed": True, "reason": "Dashboard visible"}
 
-        # 1) Establish baseline healthy run -> clears needs_verify to 0
+        # 1) 先完成一次正常基线运行 -> 将 needs_verify 清零
         s = Settings()
         s.supervisor.l2_policy = "on_change"
         s.supervisor.unattended = True
@@ -411,15 +411,15 @@ def test_browser_sentinel_catches_500_and_expired_session_recovered_by_fallback(
         )
         assert svc.store.step_stats(flow["id"], "open_dash")["needs_verify"] == 0
 
-        # 2) Server returns HTTP 500 on /dashboard -> L1.5 Sentinel catches doc_status=500 deterministically!
+        # 2) 服务端在 /dashboard 返回 HTTP 500 -> L1.5 哨兵确定性捕获 doc_status=500！
         state.dashboard_500 = True
         r_500 = svc.orchestrator.process_run(svc.orchestrator.submit_run(flow["id"], {}, enqueue=False)["id"])
         assert r_500["status"] == "failed"
         open_checks = r_500["steps"][0]["checks"]
         assert any(c["level"] == "L1.5" and not c["passed"] and "HTTP 500" in c["detail"] for c in open_checks)
 
-        # 3) Server recovers from 500, but session expired (302 -> /login)!
-        # L1.5 Sentinel detects login wall -> wakes Adaptive L2 -> Repairer gives up -> Tier-2 FallbackAgent re-authenticates!
+        # 3) 服务端从 500 恢复，但登录会话已过期（302 跳转至 /login）！
+        # L1.5 哨兵识别登录拦截 -> 唤醒自适应 L2 -> 修复者放弃 -> 二级兜底智能体重新登录恢复流程！
         state.dashboard_500 = False
         state.logged_in = False
         state.require_login_for_dash = True
@@ -448,7 +448,7 @@ def test_long_horizon_batch_interrupt_and_checkpoint_resume(tmp_path: Path, sess
     state = PortalState()
     srv, base_url = start_portal(state)
     try:
-        # Seed unit flow for ORD-101..ORD-103 (first 3 items, v1 UI)
+        # 预置适用于 ORD-101..ORD-103（前 3 项 v1 界面）的单笔流程
         unit_src = textwrap.dedent('''
             from cuaflow.flow import Ctx, Flow, expect
 
@@ -474,7 +474,7 @@ def test_long_horizon_batch_interrupt_and_checkpoint_resume(tmp_path: Path, sess
         task_holder: dict[str, str] = {}
 
         def planner_run1(messages, tools):
-            # Won't reach finish because cancel fires after item #2 (index 1)
+            # 第 2 项（索引 1）完成后即触发取消，因此不会走到 finish
             return {
                 "tool": "run_batch",
                 "args": {
@@ -500,7 +500,7 @@ def test_long_horizon_batch_interrupt_and_checkpoint_resume(tmp_path: Path, sess
 
         task = svc.orchestrator.submit_task("批量提取3笔订单", mode="mission", enqueue=False)
 
-        # Cancel task right when batch_progress reaches completed == 2!
+        # 当 batch_progress 进度达到 completed == 2 时立即取消任务！
         def on_ev(ev):
             if ev["type"] == "batch_progress" and ev["data"].get("completed") == 2:
                 svc.orchestrator.abort(task["id"])
@@ -517,7 +517,7 @@ def test_long_horizon_batch_interrupt_and_checkpoint_resume(tmp_path: Path, sess
             f"HITS={state.order_hits} B1={t_interrupted['checkpoint']['batches']['b1']}"
         )
 
-        # Now resume! ORD-101 and ORD-102 must NOT be hit again; only ORD-103 runs!
+        # 执行断点续跑！ORD-101 与 ORD-102 不得被重复访问，仅补充执行 ORD-103！
         resume_step = {"n": 0}
 
         def planner_resume(messages, tools):
@@ -546,7 +546,7 @@ def test_long_horizon_batch_interrupt_and_checkpoint_resume(tmp_path: Path, sess
 
 
 def test_stateful_spa_pagination_loop_and_live_browser_observe(tmp_path: Path, session_file: Path):
-    """SPA table where 'Next' mutates DOM in-place (no per-page URLs); run_batch(max_iterations=10) stops on has_next=False."""
+    """单页应用（SPA）原地更新 DOM 翻页（无独立分页 URL）测试；run_batch(max_iterations=10) 会在 has_next=False 时自动停止。"""
     spa_html = """<!doctype html><html><head><meta charset="utf-8"><title>SPA Feed</title></head><body>
     <h1>实时数据流</h1><div id="row">ITEM-1</div>
     <button id="next-btn" onclick="
@@ -633,7 +633,7 @@ def test_stateful_spa_pagination_loop_and_live_browser_observe(tmp_path: Path, s
                     },
                 }
             if turn["n"] == 3:
-                # Immediately after _reload_scratch(), observe() must attach to the already-open live browser!
+                # 在 _reload_scratch() 之后立即调用 observe()，必须直接附着到已打开的活动浏览器会话！
                 return {"tool": "observe", "args": {}}
             obs_seen["aria"] = str(messages[-2].get("content", ""))
             return {"tool": "finish", "args": {"final_response": "SPA 翻页完成"}}
@@ -654,9 +654,9 @@ def test_stateful_spa_pagination_loop_and_live_browser_observe(tmp_path: Path, s
         assert task["status"] == "succeeded", f"FINAL={task.get('final_response')} CKPT={task.get('checkpoint')}"
         assert "pages_out" in task["checkpoint"]["mission_state"], task["checkpoint"]
         items = [x["item"] for x in task["checkpoint"]["mission_state"]["pages_out"]]
-        # Stopped automatically after 4 pages (out of max_iterations=10) when has_next became False!
+        # 在跑完 4 页、has_next 变为 False 后自动停止（未跑满 max_iterations=10）！
         assert items == ["ITEM-1", "ITEM-2", "ITEM-3", "ITEM-4"]
-        # And observe() after _reload_scratch() attached to the live browser and saw ITEM-4!
+        # 且 _reload_scratch() 之后的 observe() 已成功连接活动浏览器并看到 ITEM-4！
         assert "ITEM-4" in obs_seen["aria"] and "SPA Feed" in obs_seen["aria"]
     finally:
         srv.shutdown()

@@ -1,6 +1,6 @@
-"""Thin ctypes wrappers over user32/kernel32/dwmapi (no pywin32 dependency).
+"""基于 ctypes 的 user32/kernel32/dwmapi 轻量封装（无需依赖 pywin32）。
 
-Every function touches ``ctypes.windll`` lazily, so this module imports fine on Linux.
+所有函数均在调用时延迟访问 ``ctypes.windll``，因此本模块可在 Linux 等非 Windows 系统上正常导入。
 """
 
 from __future__ import annotations
@@ -35,13 +35,13 @@ def _user32():
 
 
 def ensure_dpi_awareness() -> None:
-    """Make this process per-monitor DPI aware (once) so coordinates are physical pixels."""
+    """将当前进程设为每显示器 DPI 感知模式（仅执行一次），确保所有坐标均为物理像素。"""
     global _dpi_done
     if _dpi_done or not IS_WINDOWS:
         return
     _dpi_done = True
     try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # type: ignore[attr-defined]  # PER_MONITOR_AWARE
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # type: ignore[attr-defined]  # 设为每显示器 DPI 感知（PER_MONITOR_AWARE）
     except Exception:  # noqa: BLE001
         try:
             ctypes.windll.user32.SetProcessDPIAware()  # type: ignore[attr-defined]
@@ -50,7 +50,7 @@ def ensure_dpi_awareness() -> None:
 
 
 def enum_windows() -> list[int]:
-    """Top-level window handles in Z-order (topmost first)."""
+    """按 Z 轴顺序（最顶层优先）枚举所有顶层窗口句柄。"""
     user32 = _user32()
     handles: list[int] = []
     proto = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
@@ -107,7 +107,7 @@ def owner(hwnd: int) -> int:
 
 
 def window_rect(hwnd: int) -> tuple[int, int, int, int]:
-    """Visible frame bounds (without drop shadow when DWM is available)."""
+    """获取窗口可见边框矩形（DWM 可用时自动剔除阴影边距）。"""
     rect = wintypes.RECT()
     try:
         res = ctypes.windll.dwmapi.DwmGetWindowAttribute(  # type: ignore[attr-defined]
@@ -145,7 +145,7 @@ def foreground_window() -> int:
 
 
 def process_name(pid: int) -> str:
-    """Executable base name of ``pid`` (psutil if available, else QueryFullProcessImageNameW)."""
+    """获取 ``pid`` 对应的可执行文件名（优先使用 psutil，不可用时回退至 QueryFullProcessImageNameW）。"""
     if not pid:
         return ""
     try:
@@ -157,7 +157,7 @@ def process_name(pid: int) -> str:
     if not IS_WINDOWS:
         return ""
     kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
-    handle = kernel32.OpenProcess(0x1000, False, int(pid))  # PROCESS_QUERY_LIMITED_INFORMATION
+    handle = kernel32.OpenProcess(0x1000, False, int(pid))  # 权限标志 PROCESS_QUERY_LIMITED_INFORMATION
     if not handle:
         return ""
     try:
@@ -171,7 +171,7 @@ def process_name(pid: int) -> str:
 
 
 def set_foreground(hwnd: int) -> bool:
-    """Bring ``hwnd`` to the foreground (restoring it, with the ALT-key focus-steal workaround)."""
+    """将窗口 ``hwnd`` 激活置顶（若最小化则先还原，必要时配合 Alt 键绕过前台焦点抢占限制）。"""
     user32 = _user32()
     h = wintypes.HWND(hwnd)
     if user32.IsIconic(h):
@@ -191,7 +191,7 @@ def post_close(hwnd: int) -> None:
 
 
 def is_app_window(hwnd: int) -> bool:
-    """Visible, titled, non-tool, non-cloaked top-level window (what a user sees in Alt-Tab)."""
+    """判断是否为可见、有标题、非工具窗口且未被 DWM 隐藏的顶层应用窗口（即用户在 Alt-Tab 中可见的窗口）。"""
     if not is_visible(hwnd) or is_cloaked(hwnd):
         return False
     if not window_text(hwnd).strip():

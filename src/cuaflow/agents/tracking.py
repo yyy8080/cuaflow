@@ -1,4 +1,4 @@
-"""Run bookkeeping shared by Supervisor and Author: step records, events, tickets, cancellation."""
+"""供 `Supervisor` 与 `Author` 共用的运行状态记录器：步骤记录、事件广播、人工工单与取消令牌。"""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ class CancelToken:
 
 
 class TicketBroker:
-    """Human-in-the-loop tickets. ``wait`` blocks the worker until the console resolves the ticket."""
+    """人机协同工单代理。``wait`` 会阻塞工作线程，直至控制台处理并结单。"""
 
     def __init__(self, store: Store, bus: EventBus):
         self.store, self.bus = store, bus
@@ -77,7 +77,7 @@ class RunTracker:
         self.flow_id, self.task_id = flow_id, task_id
         self.records: list[dict[str, Any]] = []
 
-    # --- records -----------------------------------------------------------
+    # --- 步骤记录 -----------------------------------------------------------
     def init_steps(self, steps: list[dict[str, Any]], keep_existing: bool = False) -> None:
         existing = {r["step_id"]: r for r in self.records} if keep_existing else {}
         self.records = [existing.get(s["id"]) or {
@@ -99,7 +99,7 @@ class RunTracker:
     def persist(self) -> None:
         self.store.update_run(self.run_id, steps=self.records)
 
-    # --- events ------------------------------------------------------------
+    # --- 事件发布 -----------------------------------------------------------
     def emit(self, type: str, data: dict[str, Any] | None = None, step_id: str | None = None) -> None:  # noqa: A002
         self.bus.publish(type, data or {}, run_id=self.run_id, flow_id=self.flow_id, task_id=self.task_id,
                          step_id=step_id)

@@ -78,7 +78,7 @@ def test_runner_patch_retry_and_restart(flow_file, tmp_path):
         assert r1["screenshot"] and (run_dir / r1["screenshot"]).is_file()
         r2 = rc.run_step("check")
         assert r2["status"] == "failed" and r2["error_kind"] == "expectation"
-        # hot-patch the failing step and retry with live state preserved
+        # 在保留实时运行状态的前提下热补丁替换失败步骤并重试
         fixed = get_step_source(flow_file.read_text(encoding="utf-8"), "check").replace('"xxx"', '"xx"')
         rc.replace_step(fixed, expected_id="check")
         r3 = rc.run_step("check")
@@ -88,7 +88,7 @@ def test_runner_patch_retry_and_restart(flow_file, tmp_path):
         ex = rc.exec("print(c.state['path'].endswith('a.txt'))")
         assert ex["ok"] and "True" in ex["stdout"]
         assert rc.finish()["output"] == {"ok": True}
-        # restart from checkpoint: state restored, patched code is NOT (file unchanged)
+        # 从检查点重启：运行状态已恢复，但未落盘的临时热补丁代码不会保留（原文件未变）
         state, passed = latest_checkpoint_state(run_dir)
         assert passed == ["write", "check"] and state["path"].endswith("a.txt")
         rc.restart(state=state)

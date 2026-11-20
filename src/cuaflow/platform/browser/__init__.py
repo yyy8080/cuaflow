@@ -1,4 +1,4 @@
-"""Persistent browser backend (detached Chromium / Edge over CDP)."""
+"""持久化浏览器后端（基于 CDP 驱动的分离式 Chromium / Edge 进程）。"""
 
 from cuaflow.platform.browser.session import (
     BrowserError,

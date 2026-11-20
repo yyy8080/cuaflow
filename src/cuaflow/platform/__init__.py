@@ -1,7 +1,7 @@
-"""cuaflow platform layer: shell, desktop (Windows UIA / fake) and persistent browser backends.
+"""cuaflow 平台抽象层：命令行 Shell、桌面（Windows UIA / 内存模拟）以及持久化浏览器后端。
 
-Heavy/optional dependencies (Playwright, pywinauto, uiautomation, mss) are imported lazily,
-so ``import cuaflow.platform`` is cheap and safe on every OS.
+重量级或可选依赖（Playwright、pywinauto、uiautomation、mss）均按需延迟导入，
+因此在任意操作系统上执行 ``import cuaflow.platform`` 都轻量且安全。
 """
 
 from cuaflow.platform.base import (

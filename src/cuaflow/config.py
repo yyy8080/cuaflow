@@ -1,4 +1,4 @@
-"""Settings (models per role, supervisor policy, safety) persisted as JSON in the data dir."""
+"""全局配置管理（各角色模型、监督器策略、安全策略等），以 JSON 格式持久化保存在数据目录中。"""
 
 from __future__ import annotations
 

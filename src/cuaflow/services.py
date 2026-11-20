@@ -1,4 +1,4 @@
-"""Service container + orchestrator (task queue, matching, long-horizon mission planner, supervised runs, continuous schedules)."""
+"""服务容器与编排器（任务队列、工作流匹配、长程任务规划器、受监督运行与持续定时调度）。"""
 
 from __future__ import annotations
 
@@ -74,7 +74,7 @@ class Services:
 
 
 class Orchestrator:
-    """Serial worker + continuous schedule monitor (desktop/browser is a shared physical resource)."""
+    """串行工作线程与持续定时调度监控器（桌面与浏览器属于共享物理资源，需串行互斥使用）。"""
 
     def __init__(self, svc: Services, start_worker: bool = True):
         self.svc = svc
@@ -89,7 +89,7 @@ class Orchestrator:
             self._sched_thread = threading.Thread(target=self._scheduler_loop, name="cuaflow-scheduler", daemon=True)
             self._sched_thread.start()
 
-    # ------------------------------------------------------------------ submit & resume
+    # ------------------------------------------------------------------ 任务提交与恢复
     def submit_task(
         self,
         instruction: str,
@@ -166,7 +166,7 @@ class Orchestrator:
             if task.get("run_id"):
                 self.tokens.setdefault(task["run_id"], CancelToken()).cancel()
 
-    # ------------------------------------------------------------------ worker & scheduler
+    # ------------------------------------------------------------------ 工作线程与定时调度循环
     def _loop(self) -> None:
         while not self._stop.is_set():
             kind, ident, extra = self.jobs.get()
@@ -195,7 +195,7 @@ class Orchestrator:
         while not self._stop.wait(2.0):
             try:
                 for sc in self.svc.store.due_schedules():
-                    # Push onto serial worker queue; bump next_run_at temporarily so it isn't double-enqueued
+                    # 推入串行工作队列；临时顺延 next_run_at 以避免重复入队
                     from cuaflow.library.store import future_iso
 
                     self.svc.store.update_schedule(sc["id"], next_run_at=future_iso(sc["interval_seconds"]))
@@ -204,7 +204,7 @@ class Orchestrator:
                 pass
 
     def tick_schedules(self) -> list[dict[str, Any]]:
-        """Synchronously execute all currently due schedules (used by tests and manual triggers)."""
+        """同步执行当前所有已到期的定时计划（供测试与手动触发使用）。"""
         results = []
         for sc in self.svc.store.due_schedules():
             results.append(self.process_schedule(sc["id"]))
@@ -304,11 +304,11 @@ class Orchestrator:
             return set_status("aborted")
 
         with usage_scope(task_meter):
-            # 1. Resuming a checkpointed mission jumps straight into MissionPlanner
+            # 1. 恢复带有检查点的长程任务时，直接进入 MissionPlanner
             if resume and task.get("checkpoint"):
                 return self._run_mission(task, cancel, set_status, resume=True, unattended=unattended)
 
-            # 2. Resuming an interrupted single-flow run restores from steps.jsonl checkpoint
+            # 2. 恢复中断的单工作流运行时，从 steps.jsonl 检查点还原执行
             if resume and task.get("flow_id") and task.get("run_id"):
                 prev_run = store.get_run(task["run_id"])
                 if prev_run and prev_run.get("kind") == "flow":
@@ -319,7 +319,7 @@ class Orchestrator:
                                                       unattended=unattended)
                     return self._finish_task(task_id, run, set_status)
 
-            # 3. Explicit mission mode goes straight to MissionPlanner
+            # 3. 显式指定 mission 模式时，直接交由 MissionPlanner 执行
             if task.get("mode") == "mission":
                 m = {"verdict": "mission", "flow_id": None, "params": task.get("params") or {},
                      "reason": "explicit mission mode"}
@@ -334,14 +334,14 @@ class Orchestrator:
                                task.get("start_url"), task.get("params"))
             set_status("matching", match=m)
 
-            # 4. Fast path: existing Flow matched -> execute deterministically under Supervisor (0 exploration tokens!)
+            # 4. 快速路径：命中已有工作流 -> 在 Supervisor 监督下确定性执行（零探索 Token 消耗）
             if m["verdict"] == "run":
                 run = self.submit_run(m["flow_id"], m.get("params") or {}, task_id=task_id, enqueue=False,
                                       unattended=unattended)
                 self.tokens[run["id"]] = cancel
                 set_status("running", run_id=run["id"], flow_id=m["flow_id"])
                 run = self.svc.supervisor.execute(run["id"], cancel, unattended=unattended)
-                # If the script failed structurally (not aborted / not CAPTCHA) and Planner is available, recover autonomously!
+                # 若脚本发生结构性失败（非手动中止且非遇到 CAPTCHA）且 Planner 可用，则切换为自主规划恢复执行
                 if (
                     run.get("status") == "failed"
                     and not cancel.cancelled
@@ -356,11 +356,11 @@ class Orchestrator:
                     return self._run_mission(task, cancel, set_status, resume=False, unattended=unattended)
                 return self._finish_task(task_id, run, set_status)
 
-            # 5. Long-horizon / multi-stage / batch mission -> MissionPlanner
+            # 5. 长程 / 多阶段 / 批量任务 -> 交由 MissionPlanner 规划执行
             if self._should_use_mission(task, m, resume=resume):
                 return self._run_mission(task, cancel, set_status, resume=resume, unattended=unattended)
 
-            # 6. Single linear task -> Author compiles v1 while doing
+            # 6. 单一线性任务 -> 由 Author 边执行边编译生成 v1 工作流
             set_status("authoring")
             run = store.create_run("author", task.get("params") or {}, task_id=task_id)
             store.append_task_run(task_id, run["id"])

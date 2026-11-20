@@ -1,4 +1,4 @@
-"""``WindowsDesktop``: the native ``DesktopBackend`` (UIA via pywinauto/uiautomation, mss, SendInput)."""
+"""``WindowsDesktop``：Windows 原生桌面后端实现（基于 pywinauto/uiautomation 的 UIA、mss 截图与 SendInput 输入）。"""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from cuaflow.platform.windows import _win32, input as _input, screen as _screen,
 
 _INSTALL_HINT = "install the Windows extras: pip install 'cuaflow[win]'"
 
-# classes that are never "unexpected popups"
+# 绝不会作为“意外弹窗”处理的系统窗口类名集合
 _IGNORED_CLASSES = {
     "Shell_TrayWnd", "Shell_SecondaryTrayWnd", "Progman", "WorkerW", "#32768", "tooltips_class32",
     "IME", "MSCTFIME UI", "Windows.UI.Core.CoreWindow", "SysShadow", "NotifyIconOverflowWindow",
@@ -27,7 +27,7 @@ class DesktopError(RuntimeError):
 
 @contextlib.contextmanager
 def pywinauto_errors(what: str) -> Iterator[None]:
-    """Translate pywinauto/COM exceptions into clear built-in exceptions."""
+    """将 pywinauto 或 COM 底层异常转换为清晰的 Python 内置异常或 DesktopError。"""
     try:
         yield
     except ImportError as exc:
@@ -36,7 +36,7 @@ def pywinauto_errors(what: str) -> Iterator[None]:
         raise
     except Exception as exc:  # noqa: BLE001
         name = type(exc).__name__
-        if name == "TimeoutError":  # pywinauto.timings.TimeoutError
+        if name == "TimeoutError":  # 对应 pywinauto.timings.TimeoutError 超时异常
             raise TimeoutError(f"{what}: timed out ({exc})") from exc
         if name in ("ElementNotFoundError", "WindowNotFoundError", "ElementAmbiguousError"):
             raise LookupError(f"{what}: {name}: {exc}") from exc
@@ -59,11 +59,11 @@ def _ps_quote(s: str) -> str:
 
 
 class WindowsDesktop:
-    """Native Windows desktop backend. All coordinates are physical pixels.
+    """Windows 原生桌面后端。所有坐标均采用物理屏幕像素。
 
-    ``window(...)`` returns a pywinauto ``WindowSpecification`` (UIA backend) bound to the
-    matched window handle, so ``win.child_window(...)``, ``win.type_keys(...)``,
-    ``win.print_control_identifiers()`` etc. all work in flow steps.
+    ``window(...)`` 返回绑定到目标窗口句柄的 pywinauto ``WindowSpecification``（UIA 后端），
+    因此在工作流步骤中可直接调用 ``win.child_window(...)``、``win.type_keys(...)``、
+    ``win.print_control_identifiers()`` 等方法。
     """
 
     name = "windows"
@@ -75,9 +75,9 @@ class WindowsDesktop:
         self.default_timeout = default_timeout
         self._pwa: Any = None
 
-    # ------------------------------------------------------------------ helpers
+    # ------------------------------------------------------------------ 内部辅助方法
     def pywinauto_desktop(self) -> Any:
-        """Lazily created ``pywinauto.Desktop(backend="uia")``."""
+        """按需延迟创建的 ``pywinauto.Desktop(backend="uia")`` 实例。"""
         if self._pwa is None:
             with pywinauto_errors("pywinauto init"):
                 from pywinauto import Desktop  # type: ignore
@@ -86,7 +86,7 @@ class WindowsDesktop:
         return self._pwa
 
     def hwnd_of(self, window: Any | None) -> int:
-        """Resolve a window-ish object (None → foreground) to a native handle."""
+        """将各类窗口引用对象（``None`` 表示当前前台窗口）解析为原生窗口句柄 HWND。"""
         if window is None:
             h = _win32.foreground_window()
             if not h:
@@ -111,7 +111,7 @@ class WindowsDesktop:
         raise TypeError(f"cannot resolve a window handle from {type(window).__name__}")
 
     def wrapper_of(self, window: Any | None) -> Any:
-        """pywinauto UIA wrapper for ``window``."""
+        """获取 ``window`` 对应的 pywinauto UIA 控件包装对象。"""
         if window is not None and hasattr(window, "wrapper_object"):
             with pywinauto_errors("resolve window"):
                 return window.wrapper_object()
@@ -134,9 +134,9 @@ class WindowsDesktop:
             extra=extra,
         )
 
-    # ------------------------------------------------------------------ observation
+    # ------------------------------------------------------------------ 桌面观测
     def screenshot(self, path: str | Path, window: Any | None = None) -> Path:
-        """Whole virtual screen, or the on-screen rectangle of ``window`` (not activated)."""
+        """截取整个虚拟屏幕，或指定 ``window`` 在屏幕上的矩形区域（不会自动激活置顶该窗口）。"""
         if window is None:
             return _screen.grab(path)
         return _screen.grab_window(path, self.hwnd_of(window))
@@ -164,7 +164,7 @@ class WindowsDesktop:
         return "\n".join(lines)
 
     def windows(self) -> list[WindowInfo]:
-        """Visible top-level application windows (Alt-Tab-like), topmost first."""
+        """获取所有可见顶层应用窗口列表（类似 Alt-Tab 视图，按最顶层优先排序）。"""
         return [self.info(h) for h in _win32.enum_windows() if _win32.is_app_window(h)]
 
     def foreground(self) -> WindowInfo | None:
@@ -172,12 +172,12 @@ class WindowsDesktop:
         return self.info(h) if h else None
 
     def modal_dialogs(self) -> list[WindowInfo]:
-        """Top-level dialogs/popups that may block automation.
+        """检测可能阻塞自动化流程的顶层对话框或模态弹窗。
 
-        Detected by: dialog class ``#32770``; owned windows with a caption/dialog frame
-        (``owned_modal`` when the owner is disabled, else ``owned_popup``); UIA
-        ``WindowPattern.IsModal``; and UIA ``Window`` children embedded inside the
-        foreground window (e.g. XAML ContentDialogs in modern apps, ``embedded``).
+        识别依据：标准对话框类名 ``#32770``；带标题栏或对话框边框的从属窗口
+        （所有者窗口被禁用时记为 ``owned_modal``，否则记为 ``owned_popup``）；
+        UIA ``WindowPattern.IsModal`` 属性；以及前台窗口内部嵌入的 UIA ``Window`` 子控件
+        （例如现代应用中的 XAML ContentDialog，记为 ``embedded``）。
         """
         auto = _uiautomation()
         found: list[WindowInfo] = []
@@ -230,18 +230,18 @@ class WindowsDesktop:
                     pass
         return found
 
-    # ------------------------------------------------------------------ window / app control
+    # ------------------------------------------------------------------ 窗口与应用控制
     def launch(self, command: str, args: list[str] | None = None, cwd: str | None = None) -> int:
-        """Start a program (or open a document / App Paths name like ``excel``); returns the pid (0 if unknown).
+        """启动程序（或打开文档 / 启动 ``excel`` 等 App Paths 注册应用），返回进程 PID（未知时返回 0）。
 
-        Note: some apps (Windows 11 Notepad, Office) hand off to another process, so locate
-        their windows by title/process rather than by the returned pid.
+        注意：部分应用（如 Windows 11 记事本、Office）启动后会将窗口移交给其他进程，
+        因此后续查找窗口时建议按标题或进程名匹配，而非依赖此处返回的 PID。
         """
         args = list(args or [])
         try:
             proc = subprocess.Popen(  # noqa: S603
                 [command, *args], cwd=cwd, close_fds=True,
-                creationflags=0x00000200,  # CREATE_NEW_PROCESS_GROUP
+                creationflags=0x00000200,  # 进程创建标志 CREATE_NEW_PROCESS_GROUP
             )
             return proc.pid
         except OSError:
@@ -269,10 +269,10 @@ class WindowsDesktop:
         process: str | None = None,
         class_name: str | None = None,
     ) -> list[int]:
-        """Handles of visible top-level windows matching all given criteria (foreground first).
+        """返回匹配所有给定条件的可见顶层窗口句柄列表（当前前台窗口优先排在首位）。
 
-        ``title`` is exact; ``title_re`` uses ``re.search``; ``process`` is the exe name
-        (case-insensitive, ``.exe`` optional) or a pid as a string/int.
+        ``title`` 为精确匹配；``title_re`` 使用 ``re.search`` 正则匹配；``process`` 可为进程可执行文件名
+        （忽略大小写，``.exe`` 后缀可选）或字符串/整数形式的 PID。
         """
         rx = re.compile(title_re) if title_re else None
         proc_l = str(process).lower() if process is not None else None
@@ -300,7 +300,7 @@ class WindowsDesktop:
                 elif _win32.process_name(pid).lower() != proc_l:
                     continue
             if title is None and rx is None and class_name is None and not text.strip():
-                continue  # process-only search: skip untitled helper windows
+                continue  # 仅按进程搜索时：跳过无标题的辅助隐藏窗口
             out.append(h)
         fg = _win32.foreground_window()
         if fg in out:
@@ -353,14 +353,14 @@ class WindowsDesktop:
                 raise DesktopError(f"could not bring window 0x{hwnd:X} to the foreground") from None
 
     def close_window(self, window: Any) -> None:
-        """Ask the window to close (WindowPattern.Close / WM_CLOSE). Save prompts are not handled."""
+        """请求关闭指定窗口（通过 WindowPattern.Close 或发送 WM_CLOSE 消息），不会自动处理未保存提示框。"""
         hwnd = self.hwnd_of(window)
         try:
             self.wrapper_of(hwnd).close()
         except Exception:  # noqa: BLE001
             _win32.post_close(hwnd)
 
-    # ------------------------------------------------------------------ input
+    # ------------------------------------------------------------------ 键鼠输入
     def type_text(self, text: str, interval: float = 0.0) -> None:
         with pywinauto_errors("type_text"):
             _input.type_text(text, interval)
@@ -381,7 +381,7 @@ class WindowsDesktop:
         with pywinauto_errors("scroll"):
             _input.scroll(x, y, clicks)
 
-    # ------------------------------------------------------------------ conveniences
+    # ------------------------------------------------------------------ 便捷封装方法
     def wait_window_gone(self, window: Any = None, timeout: float = 10, **criteria: Any) -> bool:
         from cuaflow.platform.windows.apps import wait_window_gone
 

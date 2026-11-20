@@ -1,9 +1,9 @@
-"""Supervisor: executes a flow step by step, verifies every step (L0–L3), and drives 4-tier self-healing:
+"""监督智能体 `Supervisor`：逐步执行流程，完成每一步校验（L0–L3），并驱动四级自愈机制：
 
-Tier 0: Zero-token deterministic browser recovery (CDP reconnect, leaked tab pruning, overlay dismissal).
-Tier 1: Step-level ``Repairer`` (hot-patches the single broken step in-place and saves a new flow version).
-Tier 2: Autonomous ``FallbackAgent`` takeover (interactively recovers live browser/desktop state on multi-step detours).
-Tier 3: Safe stop (unattended mode) or human ticket escalation (interactive mode / CAPTCHA boundary).
+第 0 级：零 Token 确定性浏览器恢复（CDP 重连、清理泄漏标签页、关闭安全遮罩弹窗）。
+第 1 级：单步修补器 ``Repairer``（原位热修补单个故障步骤并保存为新流程版本）。
+第 2 级：自主兜底智能体 ``FallbackAgent`` 接管（遇到多步绕行场景时交互式恢复实时浏览器或桌面状态）。
+第 3 级：安全中止（无人值守模式）或升级人工工单（交互模式 / 命中 CAPTCHA 安全边界）。
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ class Deps:
     settings: Callable[[], Settings]
     tickets: TicketBroker
     shell_factory: Callable[[], ShellBackend]
-    runner_opts: dict[str, Any] = field(default_factory=dict)  # e.g. {"desktop": "fake", "headless": True}
+    runner_opts: dict[str, Any] = field(default_factory=dict)  # 例如 {"desktop": "fake", "headless": True}
 
     def new_runner(self, run_dir: Path) -> RunnerClient:
         rc = RunnerClient(log_path=run_dir / "runner.log")
@@ -118,7 +118,7 @@ class Supervisor:
                     for st in steps[:start]:
                         tr.set_step_status(st["id"], "skipped")
                 elif passed_ckpt:
-                    # Advance past contiguous prefix of steps already passed in steps.jsonl
+                    # 跳过 steps.jsonl 中已连续通过的前置步骤
                     done_set = set(passed_ckpt)
                     while start < len(steps) and steps[start]["id"] in done_set:
                         tr.set_step_status(steps[start]["id"], "passed")
@@ -151,7 +151,7 @@ class Supervisor:
                         record_active_script_step()
                         continue
 
-                    # Safety boundary: NEVER attempt to AI-repair or bypass CAPTCHA challenges.
+                    # 安全边界：严禁尝试通过 AI 修复或绕过 CAPTCHA 人机验证。
                     if result.get("error_kind") == "captcha_blocked":
                         if effective_unattended:
                             tr.set_step_status(sid, "failed", error=result.get("error"))
@@ -179,7 +179,7 @@ class Supervisor:
                         tr.set_step_status(sid, "failed")
                         return tr.status("aborted", error="aborted at CAPTCHA gate", usage=meter.snapshot())
 
-                    # ---------------- Tier 1: Step-level Repairer ----------------
+                    # ---------------- 第 1 级：单步修补器 `Repairer` ----------------
                     tr.set_step_status(sid, "repairing")
                     tr.status("repairing")
                     repairer = Repairer(self.d.llms.get("repairer"), judge_llm, runner, run_dir, shell,
@@ -222,7 +222,7 @@ class Supervisor:
                         if resolved:
                             break
 
-                        # ---------------- Tier 2: Autonomous FallbackAgent takeover ----------------
+                        # ---------------- 第 2 级：`FallbackAgent` 自主接管 ----------------
                         if (
                             s.supervisor.autonomous_fallback
                             and not fallback_tried
@@ -264,7 +264,7 @@ class Supervisor:
                                 break
                             history.append(fb.summary)
 
-                        # ---------------- Tier 3: Unattended fail vs Human Ticket ----------------
+                        # ---------------- 第 3 级：无人值守失败中止或升级人工工单 ----------------
                         if effective_unattended:
                             err_msg = (
                                 f"步骤 {step.get('title')!r} 自动修复与自主接管均未成功: "
@@ -295,7 +295,7 @@ class Supervisor:
                             tr.set_step_status(sid, "passed")
                             store.mark_needs_verify(flow_id, sid)
                             resolved = True
-                        else:  # hint -> another round of repair attempts
+                        else:  # 人工提供提示（hint） -> 进入下一轮自动修补尝试
                             hint = res.get("hint") or ""
                         tr.status("repairing" if not resolved else "running")
                     tr.status("running", usage=meter.snapshot())
@@ -366,7 +366,7 @@ class Supervisor:
                 return result, True, checks
 
             attempt_idx += 1
-            # Tier 0: Zero-token deterministic browser heal (dismiss safe overlays / prune leaked tabs / reconnect CDP)
+            # 第 0 级：零 Token 确定性浏览器自愈（关闭安全遮罩弹窗 / 清理泄漏标签页 / 重连 CDP）
             if (
                 attempt_idx >= max_loops
                 and not tier0_used
@@ -397,7 +397,7 @@ class Supervisor:
         return result, False, checks
 
     def _after_run(self, run_id: str) -> None:
-        """Auto-rollback: if the current version keeps failing and the parent was healthy, revert."""
+        """自动回滚：若当前版本连续失败且父版本历史健康度良好，则回退至父版本。"""
         store, s = self.d.store, self.d.settings()
         run = store.get_run(run_id) or {}
         if not s.supervisor.auto_rollback or run.get("status") != "failed" or not run.get("flow_id"):

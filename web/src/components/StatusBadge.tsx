@@ -26,7 +26,7 @@ export function Badge({ tone = 'neutral', children, title }: { tone?: Tone; chil
   );
 }
 
-/** Coloured badge for run / task / step / schedule / ticket statuses. */
+/** 用于展示执行、任务、步骤、定时监控及工单状态的彩色徽章组件。 */
 export function StatusBadge({ status, pulse }: { status?: string; pulse?: boolean }) {
   if (!status) return <Badge tone="muted">–</Badge>;
   const tone = statusTone(status);

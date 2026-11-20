@@ -49,7 +49,7 @@ Compress-Archive -Path "$Root\dist\cuaflow\*" -DestinationPath $ZipPath -Compres
 Write-Host "    Portable ZIP: $ZipPath" -ForegroundColor Green
 
 Write-Host "==> [5/5] Compiling Windows Setup .exe with Inno Setup 6..." -ForegroundColor Cyan
-# Ensure installer.iss has UTF-8 BOM so Inno Setup parses Chinese characters cleanly
+# 确保 installer.iss 带有 UTF-8 BOM，以便 Inno Setup 正确解析中文字符
 $IssSource = "$PSScriptRoot\installer.iss"
 $IssBuild = "$Root\build\installer_utf8bom.iss"
 New-Item -ItemType Directory -Force -Path "$Root\build" | Out-Null
@@ -78,7 +78,7 @@ if (-not (Test-Path $SetupExe)) {
 }
 Write-Host "    Installer EXE: $SetupExe" -ForegroundColor Green
 
-# Generate SHA256 checksums
+# 生成 SHA256 校验值
 $HashLines = @()
 foreach ($Artifact in @($SetupExe, $ZipPath)) {
     if (Test-Path $Artifact) {

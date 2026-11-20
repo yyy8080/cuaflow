@@ -1,4 +1,4 @@
-"""LLM factory: build a client for a role (planner / author / supervisor / repairer / fallback / vision_judge / matcher)."""
+"""LLM 工厂：为指定角色（`planner` / `author` / `supervisor` / `repairer` / `fallback` / `vision_judge` / `matcher`）构建客户端。"""
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ def build_llm(spec: ModelSpec) -> LLM:
 
 
 class _MeteredLLM:
-    """Thin wrapper recording per-role LLM usage into any active :func:`usage_scope`."""
+    """轻量封装，将各角色的 LLM 用量记录到当前激活的 :func:`usage_scope` 中。"""
 
     def __init__(self, inner: LLM, role: str):
         self._inner = inner
@@ -66,14 +66,14 @@ class _MeteredLLM:
 
 
 class LLMProvider:
-    """Resolves role -> metered LLM. Tests inject ``override`` (role -> LLM or a single LLM for all roles)."""
+    """将角色名解析为带用量统计的 LLM。测试可注入 ``override``（角色 -> LLM 字典，或所有角色共用的单个 LLM）。"""
 
     def __init__(self, settings_getter: Callable[[], Settings], override: dict[str, LLM] | LLM | None = None):
         self._settings = settings_getter
         self._override = override
 
     def has_role(self, role: str) -> bool:
-        """Whether ``role`` is explicitly configured (as opposed to falling back)."""
+        """判断 ``role`` 是否已显式配置（而非回退）。"""
         if self._override is not None:
             if isinstance(self._override, dict):
                 return role in self._override or "default" in self._override

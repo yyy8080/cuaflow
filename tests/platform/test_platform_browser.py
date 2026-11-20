@@ -1,4 +1,4 @@
-"""End-to-end tests for the detached persistent browser (Playwright chromium, headless)."""
+"""独立常驻浏览器（Playwright Chromium 无头模式）的端到端测试。"""
 
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ def test_launch_reconnect_shutdown(session_file, tmp_path):
     shot = br.screenshot(tmp_path / "shot.png")
     assert shot.read_bytes().startswith(b"\x89PNG")
 
-    # second tab becomes the active page
+    # 新打开的第二个标签页会成为当前活动页面
     p2 = br.new_page("data:text/html;charset=utf-8,<p>second tab</p>")
     assert br.page() is p2
     p2.close()

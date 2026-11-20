@@ -1,7 +1,7 @@
-"""App-level helpers: waiting for windows to disappear, dismissing common dialogs, Excel row counts.
+"""应用级桌面辅助函数：等待窗口消失、自动关闭常见弹窗、统计 Excel/CSV 非空行数。
 
-These accept any ``DesktopBackend``; the dialog-clicking part needs ``WindowsDesktop``
-(on ``FakeDesktop`` modal windows are simply removed so the logic is testable).
+这些函数接受任意 ``DesktopBackend``；其中弹窗按钮点击需要 ``WindowsDesktop`` 支持
+（在 ``FakeDesktop`` 上会直接移除模态窗口，以便在测试环境中验证逻辑）。
 """
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ from typing import Any
 
 from cuaflow.platform.base import IS_WINDOWS, DesktopBackend, FakeDesktop, WindowInfo
 
-#: Button names tried by :func:`dismiss_common_dialogs`, in priority order.
-#: "Don't save / No" first (never persist unexpected changes), then cancel/close, then OK.
+#: :func:`dismiss_common_dialogs` 按优先级依次尝试点击的按钮名称列表。
+#: 优先选择“不保存 / 否”（绝不意外持久化未预期修改），其次为取消/关闭，最后为确定。
 DEFAULT_DISMISS_BUTTONS: list[str] = [
     "不保存", "否", "Don't Save", "Don't save", "No",
     "取消", "Cancel",
@@ -24,7 +24,7 @@ DEFAULT_DISMISS_BUTTONS: list[str] = [
 
 
 def normalize_button_name(name: str) -> str:
-    """Strip accelerators (``&``, ``(N)``, ``(&N)``), unify quotes, lower-case."""
+    """去除快捷键助记符（如 ``&``、``(N)``、``(&N)``），统一引号样式并转为小写。"""
     s = (name or "").replace("&", "").replace("\u2019", "'").replace("\u2018", "'")
     s = re.sub(r"\s*[\(（]\s*\w\s*[\)）]\s*$", "", s)
     return s.strip().rstrip(".…").strip().lower()
@@ -49,8 +49,8 @@ def wait_window_gone(
     process: str | None = None,
     poll: float = 0.2,
 ) -> bool:
-    """Wait until ``window`` (a window object / ``WindowInfo`` / handle) or every window matching
-    the criteria is gone. Returns True if gone, False on timeout."""
+    """等待 ``window``（窗口对象 / ``WindowInfo`` / 窗口句柄）或所有匹配条件的窗口消失。
+    若已消失则返回 True，超时仍存在则返回 False。"""
     if window is None and title is None and title_re is None and process is None:
         raise ValueError("wait_window_gone(): give a window or title/title_re/process criteria")
     deadline = time.monotonic() + timeout
@@ -85,7 +85,7 @@ def wait_window_gone(
 
 
 def _click_button_in(desktop: Any, dialog: WindowInfo, names: list[str]) -> str | None:
-    """Click the highest-priority button of ``names`` inside ``dialog`` (Windows). Returns its name."""
+    """在 Windows 对话框 ``dialog`` 内点击匹配 ``names`` 且优先级最高的按钮，并返回所点击按钮的文本。"""
     wanted = [normalize_button_name(n) for n in names]
     buttons: list[tuple[str, Any]] = []
     if dialog.extra.get("embedded"):
@@ -141,8 +141,8 @@ def dismiss_common_dialogs(
     rounds: int = 3,
     settle: float = 0.5,
 ) -> list[str]:
-    """Best-effort: click a dismissal button on each open modal dialog (repeated up to ``rounds``
-    times for cascades). Returns descriptions like ``"'记事本' -> clicked '不保存'"``."""
+    """尽力关闭所有当前打开的模态对话框（最多重复 ``rounds`` 轮以处理级联弹窗）。
+    返回操作描述列表，例如 ``"'记事本' -> clicked '不保存'"``。"""
     names = list(names or DEFAULT_DISMISS_BUTTONS)
     done: list[str] = []
     for _ in range(max(rounds, 1)):
@@ -172,7 +172,7 @@ def dismiss_common_dialogs(
 
 
 def excel_count_rows(path: str | Path, sheet: str | None = None) -> int:
-    """Number of non-empty rows (header included) in an ``.xlsx/.xlsm`` sheet (openpyxl) or ``.csv``."""
+    """统计 ``.xlsx/.xlsm`` 工作表（基于 openpyxl）或 ``.csv/.tsv`` 文件中的非空行数（含表头）。"""
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(path)

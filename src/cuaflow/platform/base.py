@@ -1,15 +1,15 @@
-"""Platform abstraction: shell, desktop, and browser backends.
+"""平台抽象层：命令行 Shell、原生桌面与持久化浏览器后端协议定义。
 
-Flow steps receive these through ``Ctx`` (``c.shell``, ``c.desktop``, ``c.browser``).
-Agents (Author / Repairer) reach the same functionality through the
-``cuaflow-tool`` terminal CLI (see :mod:`cuaflow.platform.cli_tools`).
+工作流步骤通过上下文 ``Ctx``（``c.shell``、``c.desktop``、``c.browser``）访问这些能力；
+智能体（Author / Repairer）则通过终端 CLI 工具 ``cuaflow-tool`` 调用相同功能
+（参见 :mod:`cuaflow.platform.cli_tools`）。
 
-Concrete implementations:
+具体实现：
 
-* :mod:`cuaflow.platform.shell` – ``LocalShell`` (PowerShell on Windows, bash elsewhere)
-* :mod:`cuaflow.platform.windows` – ``WindowsDesktop`` (UIA / pywinauto / mss)
-* :mod:`cuaflow.platform.browser` – ``PersistentBrowser`` (detached Chromium/Edge + CDP)
-* :class:`FakeDesktop` (below) – in-memory backend for tests and non-Windows hosts
+* :mod:`cuaflow.platform.shell` —— ``LocalShell``（Windows 下默认使用 PowerShell，其他平台使用 bash）
+* :mod:`cuaflow.platform.windows` —— ``WindowsDesktop``（基于 UIA / pywinauto / mss）
+* :mod:`cuaflow.platform.browser` —— ``PersistentBrowser``（分离式 Chromium/Edge 进程 + CDP）
+* :class:`FakeDesktop`（见下文）—— 面向测试及非 Windows 主机的内存模拟桌面后端
 """
 
 from __future__ import annotations
@@ -52,7 +52,7 @@ class WindowInfo:
     pid: int = 0
     handle: int = 0
     class_name: str = ""
-    rect: tuple[int, int, int, int] = (0, 0, 0, 0)  # left, top, right, bottom
+    rect: tuple[int, int, int, int] = (0, 0, 0, 0)  # 窗口矩形坐标（左、上、右、下）
     is_modal: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -81,18 +81,18 @@ class ShellBackend(Protocol):
 
 @runtime_checkable
 class DesktopBackend(Protocol):
-    """Native desktop control. All coordinates are physical screen pixels."""
+    """原生桌面控制协议。所有坐标均采用物理屏幕像素。"""
 
     name: str
 
-    # --- observation ---------------------------------------------------
+    # --- 桌面观测 -------------------------------------------------------
     def screenshot(self, path: str | Path, window: Any | None = None) -> Path: ...
     def ui_tree(self, window: Any | None = None, max_depth: int = 8, max_nodes: int = 400) -> str: ...
     def windows(self) -> list[WindowInfo]: ...
     def foreground(self) -> WindowInfo | None: ...
     def modal_dialogs(self) -> list[WindowInfo]: ...
 
-    # --- window / app control -----------------------------------------
+    # --- 窗口与应用控制 -------------------------------------------------
     def launch(self, command: str, args: list[str] | None = None, cwd: str | None = None) -> int: ...
     def window(
         self,
@@ -102,17 +102,17 @@ class DesktopBackend(Protocol):
         class_name: str | None = None,
         timeout: float = 10,
     ) -> Any:
-        """Return a ready window object (pywinauto ``WindowSpecification`` with UIA backend on
-        Windows). Raises ``TimeoutError`` if no matching window appears within ``timeout``."""
+        """返回就绪的窗口对象（Windows 下为基于 UIA 后端的 pywinauto ``WindowSpecification``）。
+        若在 ``timeout`` 秒内未出现匹配窗口，则抛出 ``TimeoutError``。"""
         ...
 
     def activate(self, window: Any) -> None: ...
     def close_window(self, window: Any) -> None: ...
 
-    # --- input -----------------------------------------------------------
+    # --- 键鼠输入 -------------------------------------------------------
     def type_text(self, text: str, interval: float = 0.0) -> None: ...
     def type_keys(self, keys: str) -> None:
-        """pywinauto key syntax, e.g. ``"^s"``, ``"{ENTER}"``, ``"%{F4}"``."""
+        """遵循 pywinauto 按键语法，例如 ``"^s"``、``"{ENTER}"``、``"%{F4}"``。"""
         ...
 
     def hotkey(self, *keys: str) -> None: ...
@@ -122,7 +122,7 @@ class DesktopBackend(Protocol):
 
 @runtime_checkable
 class BrowserBackend(Protocol):
-    """Persistent browser. ``page()`` returns a Playwright *sync* ``Page``."""
+    """持久化浏览器协议。``page()`` 返回 Playwright 同步 API 的 ``Page`` 对象。"""
 
     def page(self) -> Any: ...
     def new_page(self, url: str | None = None) -> Any: ...
@@ -132,16 +132,16 @@ class BrowserBackend(Protocol):
     def screenshot(self, path: str | Path, page: Any | None = None, full_page: bool = False) -> Path: ...
     def is_connected(self) -> bool: ...
     def disconnect(self) -> None:
-        """Drop the CDP connection but keep the browser process alive."""
+        """断开当前 CDP 连接，但保持后台浏览器进程继续运行。"""
         ...
 
     def shutdown(self) -> None:
-        """Terminate the browser process."""
+        """彻底终止浏览器进程。"""
         ...
 
 
 # ---------------------------------------------------------------------------
-# Fake desktop for tests / non-Windows hosts
+# 面向测试与非 Windows 主机的模拟桌面后端
 # ---------------------------------------------------------------------------
 
 
@@ -176,7 +176,7 @@ class FakeWindow:
 
 
 class FakeDesktop:
-    """Scriptable in-memory desktop. Tests add/remove windows and inspect ``events``."""
+    """可编程的内存模拟桌面。测试中可增删窗口并检查 ``events`` 事件记录。"""
 
     name = "fake"
 
@@ -185,7 +185,7 @@ class FakeDesktop:
         self.events: list[tuple[Any, ...]] = []
         self.clipboard = ""
 
-    # helpers for tests
+    # 测试辅助方法
     def add_window(self, title: str, process: str = "app.exe", modal: bool = False) -> WindowInfo:
         info = WindowInfo(title=title, process=process, pid=1000 + len(self._windows), is_modal=modal)
         self._windows.append(info)
@@ -194,7 +194,7 @@ class FakeDesktop:
     def remove_window(self, title: str) -> None:
         self._windows = [w for w in self._windows if w.title != title]
 
-    # protocol
+    # DesktopBackend 协议实现
     def screenshot(self, path: str | Path, window: Any | None = None) -> Path:  # noqa: ARG002
         from PIL import Image, ImageDraw
 
@@ -264,7 +264,7 @@ class FakeDesktop:
 
 
 def default_desktop() -> DesktopBackend:
-    """Return the native desktop backend for this host (Fake on non-Windows)."""
+    """返回当前主机的默认桌面后端（非 Windows 平台返回 FakeDesktop）。"""
     if IS_WINDOWS:
         from cuaflow.platform.windows import WindowsDesktop
 

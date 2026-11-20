@@ -1,4 +1,4 @@
-"""PyInstaller entrypoint for the cuaflow desktop launcher / controller."""
+"""cuaflow 桌面启动器与控制器的 PyInstaller 打包入口。"""
 
 from cuaflow.desktop import main
 

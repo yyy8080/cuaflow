@@ -1,11 +1,11 @@
-"""``cuaflow-tool``: terminal tools for agents (Author / Repairer) running shell commands.
+"""``cuaflow-tool``：供执行 Shell 命令的智能体（Author / Repairer）调用的终端工具集。
 
-Output conventions (parsed by the agent loop, see :mod:`cuaflow.platform.markers`):
+输出标记约定（由智能体循环解析，参见 :mod:`cuaflow.platform.markers`）：
 
-* ``[[CUAFLOW_IMAGE:<abs path>]]``   – attach the image to the next observation
-* ``[[CUAFLOW_ASK_USER:<question>]]`` – ask the human
+* ``[[CUAFLOW_IMAGE:<abs path>]]``   —— 将指定图片附加到下一轮观测上下文中
+* ``[[CUAFLOW_ASK_USER:<question>]]`` —— 向人类操作员发起提问
 
-Environment: ``CUAFLOW_DATA_DIR``, ``CUAFLOW_BROWSER_SESSION`` (see :mod:`cuaflow.platform.paths`).
+环境变量：``CUAFLOW_DATA_DIR``、``CUAFLOW_BROWSER_SESSION``（参见 :mod:`cuaflow.platform.paths`）。
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ def _main() -> None:
 
 
 # ---------------------------------------------------------------------------
-# factories (monkeypatched in tests)
+# 后端工厂函数（测试中可通过 monkeypatch 替换）
 # ---------------------------------------------------------------------------
 
 
@@ -77,12 +77,12 @@ def _browser_or_exit(launch: bool) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# images
+# 图像校验与截图命令
 # ---------------------------------------------------------------------------
 
 
 def validate_image(path: str | Path) -> Path:
-    """Return the resolved path of a readable PNG/JPEG/GIF/WebP image or raise ValueError."""
+    """校验并返回可读的 PNG/JPEG/GIF/WebP 图像绝对路径，若无效则抛出 ValueError。"""
     p = Path(path).expanduser()
     try:
         p = p.resolve(strict=True)
@@ -122,7 +122,7 @@ def screenshot(
     browser: bool = typer.Option(False, "--browser", help="Screenshot the persistent browser's active page."),
     full_page: bool = typer.Option(False, "--full-page", help="With --browser: capture the full scrollable page."),
 ) -> None:
-    """Take a desktop (or browser) screenshot and print an image marker."""
+    """截取桌面（或持久化浏览器）屏幕截图并打印图像标记。"""
     path = out or _default_shot_path("browser" if browser else "desktop")
     try:
         if browser:
@@ -146,7 +146,7 @@ def screenshot(
 
 @app.command("image-show")
 def image_show(path: Path = typer.Option(..., "--path", help="Image file to attach to the next observation.")) -> None:
-    """Validate an image and print the image marker so the agent sees it."""
+    """校验本地图像文件并输出图像标记，以便智能体在下一轮观测中查看该图像。"""
     try:
         p = validate_image(path)
     except ValueError as exc:
@@ -155,7 +155,7 @@ def image_show(path: Path = typer.Option(..., "--path", help="Image file to atta
 
 
 # ---------------------------------------------------------------------------
-# desktop
+# 桌面观测命令
 # ---------------------------------------------------------------------------
 
 
@@ -165,7 +165,7 @@ def ui_tree(
     depth: int = typer.Option(8, "--depth", help="Maximum tree depth."),
     max_nodes: int = typer.Option(400, "--max-nodes", help="Maximum number of nodes."),
 ) -> None:
-    """Dump the UI Automation tree of the foreground (or matching) window."""
+    """导出前台窗口（或正则匹配窗口）的 UI Automation 控件树。"""
     try:
         desk = get_desktop()
         win = desk.window(title_re=window_title_re, timeout=5) if window_title_re else None
@@ -176,7 +176,7 @@ def ui_tree(
 
 @app.command()
 def windows(as_json: bool = typer.Option(False, "--json", help="Print JSON instead of text lines.")) -> None:
-    """List visible top-level windows (foreground and modal dialogs flagged)."""
+    """列出所有可见顶层窗口（并标记当前前台窗口与模态对话框）。"""
     try:
         desk = get_desktop()
         wins = desk.windows()
@@ -213,13 +213,13 @@ def windows(as_json: bool = typer.Option(False, "--json", help="Print JSON inste
 
 
 # ---------------------------------------------------------------------------
-# browser
+# 持久化浏览器操作命令
 # ---------------------------------------------------------------------------
 
 
 @app.command()
 def aria(max_chars: int = typer.Option(12000, "--max-chars", help="Truncate the snapshot to this many chars.")) -> None:
-    """ARIA snapshot of the persistent browser's active page."""
+    """导出持久化浏览器当前活动标签页的 ARIA 无障碍树快照。"""
     br = _browser_or_exit(launch=False)
     try:
         typer.echo(br.aria_snapshot(max_chars=max_chars))
@@ -236,7 +236,7 @@ def browser_open(
     wait_until: str = typer.Option("domcontentloaded", "--wait-until", help="load | domcontentloaded | networkidle | commit"),
     timeout: float = typer.Option(60, "--timeout", help="Navigation timeout in seconds."),
 ) -> None:
-    """Open URL in the persistent browser (launching it if needed)."""
+    """在持久化浏览器中打开指定 URL（若浏览器尚未运行则自动启动）。"""
     br = _browser_or_exit(launch=True)
     try:
         page = br.new_page() if new_tab else br.page()
@@ -255,10 +255,10 @@ def browser_exec(
     code: Optional[str] = typer.Option(None, "--code", help="Inline Python code (alternative to --code-file)."),
     launch: bool = typer.Option(True, "--launch/--no-launch", help="Launch the browser if no session is live."),
 ) -> None:
-    """Run a sync-Playwright Python snippet against the persistent browser.
+    """针对持久化浏览器执行一段同步 Playwright Python 代码片段。
 
-    In scope: ``page`` (active page), ``context``, ``browser`` (cuaflow PersistentBrowser),
-    ``pw_browser`` (Playwright Browser). Exit code 1 with a traceback on exception.
+    内置作用域变量：``page``（当前活动页面）、``context``、``browser``（cuaflow PersistentBrowser）、
+    ``pw_browser``（Playwright Browser）。若执行抛出异常则打印调用栈并以退出码 1 退出。
     """
     if (code_file is None) == (code is None):
         _fail("give exactly one of --code-file or --code")
@@ -289,7 +289,7 @@ def browser_exec(
         failed = True
     finally:
         sys.stdout.flush()
-        # Keep the page the snippet ended on as the active page for the next call.
+        # 将代码片段结束时所处的页面保留为下次调用的活动页面。
         page = ns.get("page")
         if page is not None and hasattr(page, "is_closed"):
             try:
@@ -304,7 +304,7 @@ def browser_exec(
 
 @app.command("browser-status")
 def browser_status() -> None:
-    """Print the persistent browser session JSON and whether it is alive."""
+    """输出持久化浏览器的会话 JSON 信息及其存活状态。"""
     from cuaflow.platform.browser import PersistentBrowser
 
     typer.echo(json.dumps(PersistentBrowser.status(browser_session_file()), ensure_ascii=False, indent=1))
@@ -312,7 +312,7 @@ def browser_status() -> None:
 
 @app.command("browser-close")
 def browser_close() -> None:
-    """Shut down the persistent browser (if running) and remove its session file."""
+    """关闭正在运行的持久化浏览器并删除其会话文件。"""
     from cuaflow.platform.browser import BrowserError, PersistentBrowser
 
     try:
@@ -325,13 +325,13 @@ def browser_close() -> None:
 
 
 # ---------------------------------------------------------------------------
-# human in the loop
+# 人机协同交互命令
 # ---------------------------------------------------------------------------
 
 
 @app.command("ask-user")
 def ask_user(question: str = typer.Option(..., "--question", help="Question for the human operator.")) -> None:
-    """Ask the human a question (the agent loop pauses and relays the answer)."""
+    """向人类操作员提问（智能体主循环将暂停执行并转发人工回复）。"""
     typer.echo(ask_user_marker(question))
 
 
@@ -339,7 +339,7 @@ def main() -> None:  # pragma: no cover
     app()
 
 
-try:  # flow commands (try-step etc.) are registered by cuaflow.flow
+try:  # 工作流相关扩展子命令（如 try-step 等）由 cuaflow.flow 模块注册
     from cuaflow.flow.tool_cmds import register as _register_flow_cmds
     _register_flow_cmds(app)
 except ImportError:

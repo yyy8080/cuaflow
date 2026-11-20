@@ -1,9 +1,9 @@
-// Pure reducer that folds live events into a Run snapshot (used by the run monitor page).
+// 将实时事件流归并到 Run 快照的纯函数 reducer（供执行监控页使用）。
 import type { CuaEvent, EventType, Repair, Run, StepRecord } from '../api';
 
 export type RunState = {
   run: Run | null;
-  events: CuaEvent[]; // sorted by seq, de-duplicated, capped
+  events: CuaEvent[]; // 按 seq 升序排列、去重并限制最大长度
   lastSeq: number;
 };
 
@@ -16,7 +16,7 @@ export const MAX_EVENTS = 5000;
 
 export const initialRunState: RunState = { run: null, events: [], lastSeq: 0 };
 
-/** Event types after which the page should refetch GET /api/runs/{id} (debounced). */
+/** 触发页面防抖重拉 GET /api/runs/{id} 最新快照的事件类型集合。 */
 export const REFETCH_TYPES: ReadonlySet<EventType> = new Set<EventType>([
   'step_end',
   'run_status',
@@ -72,7 +72,7 @@ function updateStep(run: Run, stepId: string, fn: (s: StepRecord) => StepRecord,
   return { ...run, steps };
 }
 
-/** Apply a single event to a run. Unknown / irrelevant events leave the run unchanged. */
+/** 将单条事件应用到运行状态；未知或无关事件保持原状态不变。 */
 export function applyEvent(run: Run | null, ev: CuaEvent): Run | null {
   if (!run) return run;
   const d = ev.data || {};
@@ -95,7 +95,7 @@ export function applyEvent(run: Run | null, ev: CuaEvent): Run | null {
           index: typeof d.index === 'number' ? d.index : s.index,
           title: d.title ?? s.title,
           status: 'running',
-          // re-delivered step_start for an already-running step must not bump attempts
+          // 对已在运行中的步骤重复收到 step_start 事件时，不应重复累加尝试次数
           attempts: s.status === 'running' ? Math.max(s.attempts || 0, 1) : (s.attempts || 0) + 1,
           started_at: s.status === 'running' && s.started_at ? s.started_at : ev.ts,
           ended_at: undefined,
@@ -133,7 +133,7 @@ export function applyEvent(run: Run | null, ev: CuaEvent): Run | null {
       if (!sid) return run;
       const attempt = typeof d.attempt === 'number' ? d.attempt : 1;
       return updateStep(run, sid, (s) => {
-        if (s.repairs.some((r) => r.attempt === attempt)) return s; // already known (re-delivered)
+        if (s.repairs.some((r) => r.attempt === attempt)) return s; // 已记录过该次修复（重复投递事件）
         const repairs = [...s.repairs, { attempt, started_at: ev.ts, status: 'running' as const }];
         repairs.sort((a, b) => a.attempt - b.attempt);
         return { ...s, status: 'repairing', repairs };
@@ -166,7 +166,7 @@ export function applyEvent(run: Run | null, ev: CuaEvent): Run | null {
   }
 }
 
-/** Role of an event for the event-stream filter. */
+/** 解析事件所属角色，供事件流按角色筛选使用。 */
 export function eventRole(ev: CuaEvent): string {
   switch (ev.type) {
     case 'agent_log':

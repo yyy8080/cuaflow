@@ -1,4 +1,4 @@
-"""FakeDesktop behavior and the OS-independent parts of the Windows backend."""
+"""FakeDesktop 模拟桌面行为以及 Windows 桌面后端中与操作系统无关的逻辑测试。"""
 
 from __future__ import annotations
 
@@ -87,7 +87,7 @@ def test_format_node_and_dump_tree():
     assert line == "Button name='保存' auto_id='1' class='Button' rect=(1,2,3,4) enabled focused value='v'"
     assert "disabled" in format_node(NodeProps("Edit", enabled=False))
 
-    # tree: root -> 3 children -> each 3 grandchildren
+    # 控件树结构：根节点 -> 3 个子节点 -> 每个子节点下各有 3 个孙节点
     tree = {"name": "root", "kids": [{"name": f"c{i}", "kids": [{"name": f"g{i}{j}", "kids": []}
                                                                    for j in range(3)]} for i in range(3)]}
     props = lambda n: NodeProps("Pane", name=n["name"])  # noqa: E731
@@ -139,7 +139,7 @@ def test_excel_count_rows_xlsx(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Windows smoke tests (real desktop session required)
+# Windows 冒烟测试（需要真实的 Windows 桌面会话）
 # ---------------------------------------------------------------------------
 
 
@@ -159,7 +159,7 @@ def test_windows_notepad_smoke(tmp_path):
     d.close_window(win)
     time.sleep(1.0)
     clicked = d.dismiss_common_dialogs()
-    # Classic Notepad prompts "Save changes?"; Windows 11 Notepad may silently keep the session.
+    # 经典版记事本会弹出“是否保存更改？”提示；Windows 11 新版记事本则可能静默保留会话内容。
     if clicked:
         assert any(k in c for c in clicked for k in ("Don't", "不保存", "否", "No")), clicked
     assert wait_window_gone(d, win, timeout=10)

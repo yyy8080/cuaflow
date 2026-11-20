@@ -1,11 +1,11 @@
-"""LLM client layer.
+"""LLM 客户端层。
 
-Internally every agent speaks the OpenAI *Chat Completions* message format::
+内部所有智能体统一使用 OpenAI *Chat Completions* 消息格式::
 
     {"role": "system"|"user"|"assistant"|"tool", "content": str | [parts], ...}
 
-with image parts ``{"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}``
-and assistant ``tool_calls``. Backends translate as needed.
+其中图像片段格式为 ``{"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}``，
+助手工具调用使用 ``tool_calls``。各后端按需转换消息格式。
 """
 
 from __future__ import annotations
@@ -70,7 +70,7 @@ class LLM(Protocol):
 
 
 # ---------------------------------------------------------------------------
-# helpers
+# 辅助函数
 # ---------------------------------------------------------------------------
 
 
@@ -79,7 +79,7 @@ def text_part(text: str) -> dict[str, Any]:
 
 
 def image_part(path: str | Path, detail: str = "auto", max_side: int = 1600) -> dict[str, Any]:
-    """Encode an image file as a data-URL part (downscaled to ``max_side``)."""
+    """将图像文件编码为 data-URL 片段（最大边长按需缩放至 ``max_side``）。"""
     path = Path(path)
     data = path.read_bytes()
     mime = mimetypes.guess_type(path.name)[0] or "image/png"
@@ -94,7 +94,7 @@ def image_part(path: str | Path, detail: str = "auto", max_side: int = 1600) -> 
                 buf = BytesIO()
                 img.convert("RGB").save(buf, format="JPEG", quality=85)
                 data, mime = buf.getvalue(), "image/jpeg"
-    except Exception:  # noqa: BLE001 - fall back to raw bytes
+    except Exception:  # noqa: BLE001 - 回退为原始字节数据
         pass
     url = f"data:{mime};base64,{base64.b64encode(data).decode()}"
     return {"type": "image_url", "image_url": {"url": url, "detail": detail}}
@@ -119,7 +119,7 @@ _JSON_BLOCK = re.compile(r"\{.*\}", re.S)
 
 
 def parse_json_loose(text: str) -> Any:
-    """Parse JSON from model text (tolerates code fences / surrounding prose)."""
+    """从模型输出文本中宽松解析 JSON（容忍代码块围栏及前后说明文字）。"""
     text = (text or "").strip()
     if text.startswith("```"):
         text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
@@ -134,7 +134,7 @@ def parse_json_loose(text: str) -> Any:
 
 
 def strip_images(messages: list[dict[str, Any]], keep_last: int = 2) -> list[dict[str, Any]]:
-    """Replace all but the last ``keep_last`` images with a text placeholder (bounds context)."""
+    """除最后 ``keep_last`` 张图像外，其余图像均替换为文本占位符（控制上下文长度）。"""
     positions = []
     for i, m in enumerate(messages):
         if isinstance(m.get("content"), list):
@@ -165,12 +165,12 @@ class RetryPolicy:
 
 
 # ---------------------------------------------------------------------------
-# Fake LLM for tests
+# 测试用模拟 LLM
 # ---------------------------------------------------------------------------
 
 
 class FakeLLM:
-    """Scripted LLM. ``script`` items are LLMResponse, dicts, strings, or callables(messages, tools)."""
+    """脚本化模拟 LLM。``script`` 元素可为 `LLMResponse`、字典、字符串或可调用对象 `callable(messages, tools)`。"""
 
     def __init__(self, script: list[Any] | Callable[..., Any] | None = None, vision: bool = True):
         self.script = script if script is not None else []
@@ -196,7 +196,7 @@ def to_response(item: Any) -> LLMResponse:
     if isinstance(item, str):
         return LLMResponse(content=item)
     if isinstance(item, dict):
-        if "tool" in item:  # shorthand {"tool": name, "args": {...}, "content": ...}
+        if "tool" in item:  # 简写形式 {"tool": name, "args": {...}, "content": ...}
             return LLMResponse(
                 content=item.get("content", ""),
                 tool_calls=[ToolCall(id=item.get("id", f"call_{random.randrange(1 << 30)}"),
@@ -208,7 +208,7 @@ def to_response(item: Any) -> LLMResponse:
 
 
 # ---------------------------------------------------------------------------
-# Token usage & script savings metering
+# Token 用量与脚本步骤节省量统计
 # ---------------------------------------------------------------------------
 
 import contextlib
@@ -217,7 +217,7 @@ import threading
 
 
 def _approx_msg_tokens(obj: Any) -> int:
-    """Rough token estimate when a provider/mock omits usage (avoids counting raw base64 bytes)."""
+    """当服务商或模拟对象未返回用量时的粗略 Token 估算（避免将原始 base64 字节计入）。"""
     if isinstance(obj, str):
         return max(1, len(obj) // 4) if obj else 0
     if isinstance(obj, list):
@@ -236,7 +236,7 @@ def _approx_msg_tokens(obj: Any) -> int:
 
 
 class UsageMeter:
-    """Thread-safe accumulator for LLM token spend vs zero-token scripted step savings."""
+    """线程安全的累加器，用于统计 LLM Token 消耗与零 Token 脚本步骤节省量。"""
 
     def __init__(self, tokens_per_script_step: int = 1800, initial: dict[str, Any] | None = None):
         self._lock = threading.Lock()

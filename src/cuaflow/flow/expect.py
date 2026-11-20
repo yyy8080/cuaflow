@@ -1,7 +1,7 @@
-"""Deterministic step assertions (Supervisor level L1).
+"""确定性步骤断言（`Supervisor` L1 级校验）。
 
-All failures raise :class:`ExpectationFailed`, which the runner reports as ``error_kind="expectation"``
-(as opposed to ``"exception"`` for unexpected errors).
+所有断言失败均抛出 :class:`ExpectationFailed`，运行器将其上报为 ``error_kind="expectation"``
+（以区别于未预期异常对应的 ``"exception"``）。
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ def _poll(check: Callable[[], bool], timeout: float, interval: float = 0.25) -> 
         try:
             if check():
                 return True
-        except Exception:  # noqa: BLE001 - keep polling on transient errors
+        except Exception:  # noqa: BLE001 - 遇到瞬时异常时继续轮询
             pass
         if time.monotonic() >= deadline:
             return False
@@ -50,7 +50,7 @@ def contains(haystack: Any, needle: Any, message: str = "") -> None:
         raise ExpectationFailed(f"{message + ': ' if message else ''}{needle!r} not found in {snippet!r}")
 
 
-# --- browser (Playwright sync locators / pages) -----------------------------
+# --- 浏览器（Playwright 同步定位器 / 页面） ---------------------------------
 
 
 def visible(locator: Any, timeout: float = 10) -> None:
@@ -105,7 +105,7 @@ def title(page: Any, pattern: str, timeout: float = 10) -> None:
         raise ExpectationFailed(f"page title {page.title()!r} does not match {pattern!r}")
 
 
-# --- files -------------------------------------------------------------------
+# --- 文件 -------------------------------------------------------------------
 
 
 def file_exists(path: str | Path, timeout: float = 10, min_size: int = 1) -> Path:
@@ -121,7 +121,7 @@ def file_contains(path: str | Path, needle: str, encoding: str = "utf-8", timeou
         raise ExpectationFailed(f"file {p} does not contain {needle!r}")
 
 
-# --- desktop -----------------------------------------------------------------
+# --- 桌面 -------------------------------------------------------------------
 
 
 def window_exists(desktop: Any, title_re: str, timeout: float = 10) -> Any:

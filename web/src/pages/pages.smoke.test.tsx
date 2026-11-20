@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// Smoke tests: render each page against a mocked API and fake WebSocket.
+// 冒烟测试：使用模拟 API 与虚拟 WebSocket 渲染各个页面。
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
@@ -160,7 +160,7 @@ async function render(path: string) {
       </MemoryRouter>,
     );
   });
-  // let fetches / timers settle
+  // 等待异步请求与定时器稳定
   for (let i = 0; i < 5; i++) await act(async () => new Promise((r) => setTimeout(r, 10)));
   return container.textContent || '';
 }
@@ -196,13 +196,13 @@ describe('pages render with mocked API', () => {
     expect(ws.url).toContain('/ws/events?token=tok');
     expect(ws.sent.map((s) => JSON.parse(s))).toContainEqual({ subscribe: { run_id: 'run42' } });
 
-    // select the first step -> screenshot URL carries the token
+    // 选中第一个步骤 -> 验证截图地址携带访问令牌
     const first = container.querySelector('.tl-item') as HTMLElement;
     await act(async () => first.click());
     const img = container.querySelector('.run-detail img.shot') as HTMLImageElement;
     expect(img.getAttribute('src')).toBe('/api/runs/run42/artifacts/shots/open.png?token=tok');
 
-    // live event updates state
+    // 实时事件更新页面状态
     await act(async () => {
       ws.onmessage?.({ data: JSON.stringify({ seq: 3, ts: '2024-01-03T00:00:09Z', type: 'run_status', run_id: 'run42', data: { status: 'failed', error: '超时' } }) });
     });

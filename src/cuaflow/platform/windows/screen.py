@@ -1,4 +1,4 @@
-"""Screenshots with ``mss`` (full virtual screen, a monitor, a region or a window)."""
+"""基于 ``mss`` 的屏幕截图工具（支持全虚拟屏幕、指定显示器、矩形区域或单个窗口）。"""
 
 from __future__ import annotations
 
@@ -25,8 +25,8 @@ def grab(
     region: tuple[int, int, int, int] | None = None,
     monitor: int = 0,
 ) -> Path:
-    """Capture ``region`` (left, top, right, bottom in physical pixels) or ``monitor``
-    (0 = whole virtual screen, 1 = primary, 2.. = others) to ``path``."""
+    """截取物理像素矩形区域 ``region``（左、上、右、下）或指定显示器 ``monitor``
+    （0 表示整个虚拟屏幕，1 表示主显示器，2 及以上表示其他显示器），并保存至 ``path``。"""
     import mss
 
     _win32.ensure_dpi_awareness()
@@ -50,5 +50,5 @@ def grab(
 
 
 def grab_window(path: str | Path, hwnd: int) -> Path:
-    """Capture the on-screen area of window ``hwnd`` (it should be visible / unobscured)."""
+    """截取窗口 ``hwnd`` 在屏幕上的矩形区域（窗口需处于可见且未被遮挡状态）。"""
     return grab(path, region=_win32.window_rect(hwnd))

@@ -1,10 +1,10 @@
-"""Filesystem locations shared by the platform layer, the flow runtime and the CLI tools.
+"""平台层、工作流运行时与 CLI 工具共享的文件系统路径约定。
 
-Environment variables:
+支持的环境变量：
 
-* ``CUAFLOW_DATA_DIR``         – root data directory (default: ``platformdirs.user_data_dir("cuaflow")``)
-* ``CUAFLOW_BROWSER_SESSION``  – persistent-browser session JSON (default: ``<data_dir>/browser/session.json``)
-* ``CUAFLOW_BROWSER_PROFILE``  – browser user-data-dir (default: ``<session file dir>/profile``)
+* ``CUAFLOW_DATA_DIR``         —— 根数据目录（默认：``platformdirs.user_data_dir("cuaflow")``）
+* ``CUAFLOW_BROWSER_SESSION``  —— 持久化浏览器会话 JSON 路径（默认：``<data_dir>/browser/session.json``）
+* ``CUAFLOW_BROWSER_PROFILE``  —— 浏览器用户数据目录 user-data-dir（默认：``<会话文件所在目录>/profile``）
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ ENV_BROWSER_PROFILE = "CUAFLOW_BROWSER_PROFILE"
 
 
 def data_dir(create: bool = True) -> Path:
-    """Root data directory for cuaflow (honors ``CUAFLOW_DATA_DIR``)."""
+    """返回 cuaflow 的根数据目录（优先读取环境变量 ``CUAFLOW_DATA_DIR``）。"""
     env = os.environ.get(ENV_DATA_DIR, "").strip()
     if env:
         path = Path(env).expanduser()
@@ -33,7 +33,7 @@ def data_dir(create: bool = True) -> Path:
 
 
 def browser_session_file() -> Path:
-    """Session JSON of the persistent browser (honors ``CUAFLOW_BROWSER_SESSION``)."""
+    """返回持久化浏览器的会话 JSON 文件路径（优先读取 ``CUAFLOW_BROWSER_SESSION``）。"""
     env = os.environ.get(ENV_BROWSER_SESSION, "").strip()
     if env:
         return Path(env).expanduser().resolve()
@@ -41,7 +41,7 @@ def browser_session_file() -> Path:
 
 
 def browser_profile_dir(session_file: str | Path | None = None) -> Path:
-    """Browser user-data-dir (honors ``CUAFLOW_BROWSER_PROFILE``; defaults next to the session file)."""
+    """返回浏览器的用户数据目录路径（优先读取 ``CUAFLOW_BROWSER_PROFILE``；默认位于会话文件同级的 profile 目录）。"""
     env = os.environ.get(ENV_BROWSER_PROFILE, "").strip()
     if env:
         return Path(env).expanduser().resolve()

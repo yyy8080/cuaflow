@@ -3,7 +3,7 @@ import type { RawValues } from '../lib/params';
 
 const TYPE_LABEL: Record<string, string> = { str: '文本', int: '整数', float: '小数', bool: '布尔' };
 
-/** Form generated from a params_schema. Values are kept raw; use coerceParams() before submit. */
+/** 根据 params_schema 动态生成的参数表单；表单值保持原始输入态，提交前需调用 coerceParams() 转换校验。 */
 export function ParamsForm({
   schema,
   values,

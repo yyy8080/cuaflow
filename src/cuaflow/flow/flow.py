@@ -1,16 +1,16 @@
-"""Flow definition: a reusable, parameterized script made of independently patchable steps.
+"""流程定义：由可独立热修补步骤组成的可复用参数化脚本。
 
-Example::
+示例::
 
     from cuaflow.flow import Flow, Ctx, expect
 
-    flow = Flow("Export monthly report", params={"month": "str"}, output={"rows": "int"})
+    flow = Flow("导出月度报表", params={"month": "str"}, output={"rows": "int"})
 
-    @flow.step("Open report page", expect="report page with an Export button")
+    @flow.step("打开报表页面", expect="包含导出按钮的报表页面")
     def open_report(c: Ctx):
         page = c.browser.page()
         page.goto(c.params.start_url)
-        expect.visible(page.get_by_role("button", name="Export"))
+        expect.visible(page.get_by_role("button", name="导出"))
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ class StepDef:
     retries: int = 0
     side_effect: bool = False
     critical: bool = False
-    surface: str = "auto"  # "browser" | "desktop" | "auto" -> which screenshot to take
+    surface: str = "auto"  # "browser" | "desktop" | "auto" -> 指定截取哪个界面的截图
 
     def spec(self) -> dict[str, Any]:
         return {"id": self.id, "title": self.title, "expect": self.expect, "side_effect": self.side_effect,
@@ -90,7 +90,7 @@ class Flow:
         surface: str = "auto",
         id: str | None = None,  # noqa: A002
     ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-        """Register a step. Re-registering an existing id replaces it in place (hot patching)."""
+        """注册步骤。若重复注册已有 `id`，则原位替换原步骤（用于热修补）。"""
 
         def deco(func: Callable[..., Any]) -> Callable[..., Any]:
             sid = id or func.__name__
@@ -128,7 +128,7 @@ class Flow:
         }
 
     def coerce_params(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Apply defaults and basic type coercion according to ``params_schema``."""
+        """依据 ``params_schema`` 应用默认值并执行基础类型转换。"""
         out = dict(params or {})
         casters = {"int": int, "float": float, "str": str,
                    "bool": lambda v: v if isinstance(v, bool) else str(v).lower() in ("1", "true", "yes", "on")}
@@ -151,7 +151,7 @@ class Flow:
 
 
 def load_flow(path: str | Path) -> tuple[Flow, dict[str, Any]]:
-    """Import a flow file; return the ``Flow`` instance and the module namespace."""
+    """导入流程文件，返回 ``Flow`` 实例及模块命名空间字典。"""
     path = Path(path).resolve()
     mod_name = f"cuaflow_flow_{uuid.uuid4().hex[:8]}"
     spec = importlib.util.spec_from_file_location(mod_name, path)
@@ -168,7 +168,7 @@ def load_flow(path: str | Path) -> tuple[Flow, dict[str, Any]]:
 
 @dataclass
 class Params:
-    """Attribute + item access to parameters (``c.params.month`` or ``c.params['month']``)."""
+    """支持属性与下标两种方式访问参数（如 ``c.params.month`` 或 ``c.params['month']``）。"""
 
     _data: dict[str, Any] = field(default_factory=dict)
 

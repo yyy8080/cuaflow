@@ -1,4 +1,4 @@
-"""Parent-side client for the Runner child process."""
+"""面向 Runner 子进程的父进程端客户端。"""
 
 from __future__ import annotations
 
@@ -30,11 +30,11 @@ class RunnerDied(RunnerError):
 
 
 class RunnerClient:
-    """Start/drive/restart a ``cuaflow.flow.proc`` child.
+    """启动、驱动并重启 ``cuaflow.flow.proc`` 子进程。
 
-    ``load_args`` (flow_path, params, run_dir, desktop, browser_session, headless) are remembered
-    so that :meth:`restart` can bring a crashed / timed-out runner back with the last checkpointed
-    state. Browser and desktop state survive restarts (detached browser, real OS windows).
+    客户端会记录 ``load_args``（`flow_path`、`params`、`run_dir`、`desktop`、`browser_session`、`headless`），
+    以便在子进程崩溃或超时后通过 :meth:`restart` 携带最近一次检查点状态拉起恢复。
+    浏览器与桌面状态在重启后依然存活（分离式浏览器与真实操作系统窗口）。
     """
 
     def __init__(self, log_path: str | Path | None = None, env: dict[str, str] | None = None,
@@ -58,8 +58,8 @@ class RunnerClient:
         if not is_frozen_self:
             src_root = str(Path(__file__).resolve().parents[2])
             env["PYTHONPATH"] = src_root + os.pathsep + env.get("PYTHONPATH", "")
-        # UTF-8 mode: flow code using open()/read_text() without encoding must not depend on the
-        # Windows ANSI code page (cp936/cp1252); also makes the JSON-RPC pipe encoding deterministic.
+        # UTF-8 模式：流程代码中未显式指定 encoding 的 open()/read_text() 不得依赖
+        # Windows ANSI 代码页（cp936/cp1252），同时也确保 JSON-RPC 管道编码确定一致。
         env.setdefault("PYTHONUTF8", "1")
         env.setdefault("PYTHONIOENCODING", "utf-8")
         kwargs: dict[str, Any] = {}
@@ -154,7 +154,7 @@ class RunnerClient:
         return self.call("finish", timeout=30)
 
     def restart(self, state: dict[str, Any] | None = None, flow_path: str | Path | None = None) -> None:
-        """Kill and relaunch the runner, reloading the flow with ``state``."""
+        """终止并重新启动运行器子进程，携带 ``state`` 重新加载流程。"""
         self.kill()
         self.restarts += 1
         self.start()

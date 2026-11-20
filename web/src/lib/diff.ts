@@ -1,4 +1,4 @@
-// Minimal unified-diff parser used by <DiffView>.
+// 供 <DiffView> 使用的轻量级 unified diff 解析器。
 
 export type DiffLineKind = 'add' | 'del' | 'ctx' | 'hunk' | 'file' | 'meta';
 
@@ -12,9 +12,8 @@ export type DiffLine = {
 const HUNK_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 
 /**
- * Parse a unified diff into typed lines with old/new line numbers.
- * Hunk header counts are used to know when a hunk ends, so that a deleted line whose
- * content starts with "-- " is not mistaken for a `--- file` header.
+ * 将 unified diff 解析为带类型与新旧行号的行数组。
+ * 通过变更块头部（hunk header）的行数计数判断块边界，避免块内以 "-- " 开头的删除行被误判为 `--- file` 文件头。
  */
 export function parseUnifiedDiff(diff: string | undefined | null): DiffLine[] {
   if (!diff) return [];
@@ -23,8 +22,8 @@ export function parseUnifiedDiff(diff: string | undefined | null): DiffLine[] {
   const out: DiffLine[] = [];
   let oldNo = 0;
   let newNo = 0;
-  let oldLeft = 0; // remaining old-side lines in current hunk
-  let newLeft = 0; // remaining new-side lines in current hunk
+  let oldLeft = 0; // 当前变更块剩余的旧文件行数
+  let newLeft = 0; // 当前变更块剩余的新文件行数
   for (const line of lines) {
     const inHunk = oldLeft > 0 || newLeft > 0;
     if (inHunk) {
@@ -60,7 +59,7 @@ export function parseUnifiedDiff(diff: string | undefined | null): DiffLine[] {
       out.push({ kind: 'meta', text: line });
       continue;
     }
-    // Lenient fallback for diffs with missing/incorrect hunk counts: still colour +/- lines.
+    // 针对缺失或行数计数不准确的 diff 的宽松兜底处理：依然对 +/- 行进行着色分类。
     if (line.startsWith('+')) out.push({ kind: 'add', text: line.slice(1) });
     else if (line.startsWith('-')) out.push({ kind: 'del', text: line.slice(1) });
     else out.push({ kind: 'meta', text: line });

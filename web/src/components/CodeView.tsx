@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 
-/** Monospace source viewer with line numbers; optional highlighted line range. */
+/** 带行号的等宽字体源码查看器，支持按条件高亮指定行。 */
 export function CodeView({
   source,
   highlight,

@@ -1,11 +1,11 @@
-"""UI Automation tree dumps (compact text, analogous to a browser ARIA snapshot).
+"""UI Automation 控件树紧凑文本导出（类似于浏览器的 ARIA 快照）。
 
-Line format (one control per line, indented two spaces per level)::
+单行格式（每行一个控件，每层缩进两个空格）::
 
     Button name='保存' auto_id='1' class='Button' rect=(10,20,90,44) enabled focused value='...'
 
-Empty fields are omitted. Uses ``uiautomation`` when installed (fast), otherwise
-pywinauto's UIA element wrappers.
+空字段会自动省略。已安装 ``uiautomation`` 时优先使用（速度更快），否则回退至
+pywinauto 的 UIA 元素包装器。
 """
 
 from __future__ import annotations
@@ -67,7 +67,7 @@ def dump_tree(
     max_depth: int = 8,
     max_nodes: int = 400,
 ) -> str:
-    """Generic bounded depth-first dump. ``max_depth`` counts levels below the root (root = 0)."""
+    """通用的有界深度优先控件树导出。``max_depth`` 表示根节点之下的最大展开层数（根节点深度为 0）。"""
     lines: list[str] = []
     depth_cut = 0
     truncated = False
@@ -110,7 +110,7 @@ def dump_tree(
 
 
 # ---------------------------------------------------------------------------
-# uiautomation backend
+# uiautomation 后端实现
 # ---------------------------------------------------------------------------
 
 _TOGGLE = {0: "off", 1: "on", 2: "indeterminate"}
@@ -173,7 +173,7 @@ def dump_with_uiautomation(hwnd: int, max_depth: int = 8, max_nodes: int = 400) 
 
 
 # ---------------------------------------------------------------------------
-# pywinauto backend
+# pywinauto 后端实现
 # ---------------------------------------------------------------------------
 
 

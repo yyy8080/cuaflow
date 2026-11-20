@@ -1,9 +1,9 @@
-"""Long-horizon Autonomous Mission Planner & Batch Skill Compiler.
+"""长程自主任务规划器（`MissionPlanner`）与批量技能编译器。
 
-Decomposes complex browser/desktop tasks into dynamic phases, reuses existing ``Flow`` skills,
-compiles repeatable sub-tasks / batch loops into parameterized ``Flow``s on the first iteration so
-iterations 2..N run at zero exploration tokens under ``Supervisor`` monitoring, and checkpoints
-progress after every phase and batch item so interrupted long tasks resume seamlessly.
+将复杂的浏览器或桌面任务拆解为动态阶段，优先复用流程库中已有的 ``Flow`` 技能；
+在批量循环的首轮迭代中将可重复子任务编译为参数化 ``Flow``，使第 2..N 轮迭代在
+``Supervisor`` 监督下以零探索 Token 运行；并在每个阶段及批次项完成后持久化检查点，
+确保中断的长程任务能够无缝续跑。
 """
 
 from __future__ import annotations
@@ -79,7 +79,7 @@ class MissionSession:
             initial=task.get("usage") if resume else None,
         )
 
-    # ------------------------------------------------------------------ persistence & runner context
+    # ------------------------------------------------------------------ 状态持久化与运行器上下文
     def _save_checkpoint(self) -> None:
         safe_state = json.loads(json.dumps(self.mission_state, default=str, ensure_ascii=False))
         ckpt = {
@@ -102,7 +102,7 @@ class MissionSession:
         self.store.update_run(self.run_id, usage=usage_snap)
 
     def _reload_scratch(self) -> None:
-        """Restore the planner's scratch context on the shared warm runner after a sub-run."""
+        """子运行结束后，在共享的热运行器上恢复规划器的临时上下文。"""
         if not self.scratch_flow.is_file():
             self.scratch_flow.write_text(render_flow_header("mission_scratch"), encoding="utf-8")
         safe_state = json.loads(json.dumps(self.mission_state, default=str, ensure_ascii=False))
@@ -161,7 +161,7 @@ class MissionSession:
         self._save_checkpoint()
         self.tr.emit("plan_updated", self.plan)
 
-    # ------------------------------------------------------------------ planner tools
+    # ------------------------------------------------------------------ 规划器工具实现
     def tool_update_plan(self, args: dict[str, Any]) -> ToolResult:
         phases = args.get("phases") or []
         ids = [p.get("id", "") for p in phases]
@@ -216,7 +216,7 @@ class MissionSession:
         ]
         sub = self.store.create_run("flow", params, flow_id=flow_id, version=ver, task_id=self.task_id, steps=steps)
         self.store.append_task_run(self.task_id, sub["id"])
-        # Restore active run_id pointer on task back to the parent mission run so UI tracks the mission overview.
+        # 将任务的当前 run_id 指针恢复指向父级长程任务运行记录，使前端界面持续追踪总览状态。
         self.store.update_task(self.task_id, run_id=self.run_id)
         return sub
 
@@ -381,7 +381,7 @@ class MissionSession:
                     "run_id": sub["id"],
                 }
 
-            # Keep browser clean across long loops (close leaked popup tabs)
+            # 在长循环过程中保持浏览器整洁（关闭泄漏的弹窗标签页）
             self.guard.call(lambda: self.runner.heal_browser(keep_tabs=s.planner.tab_limit))
 
             if entry["status"] != "succeeded" and on_item_error == "abort":
@@ -443,7 +443,7 @@ class MissionSession:
         return ToolResult("Mission finished.", done=True,
                           final={"final_response": args.get("final_response", ""), "output": out})
 
-    # ------------------------------------------------------------------ main loop
+    # ------------------------------------------------------------------ 主循环
     def run(self) -> dict[str, Any]:
         s = self.d.settings()
         self.tr.status("running")
@@ -456,7 +456,7 @@ class MissionSession:
                 self._reload_scratch()
                 shell = self.d.shell_factory()
                 base_tools = common_tools(self.runner, self.run_dir, shell)
-                # Wrap `python` so any mutation to `c.state` is immediately synced to `mission_state` + checkpoint!
+                # 包装 `python` 工具，使任何对 `c.state` 的修改都能立即同步至 `mission_state` 与检查点！
                 wrapped_tools: list[Tool] = []
                 for t in base_tools:
                     if t.name == "python":

@@ -46,11 +46,11 @@ def services(tmp_path, author_script, matcher_script=None):
 
 def test_author_records_then_task_reuses_flow(tmp_path):
     author_script = [
-        {"tool": "finish", "args": {"final_response": "too early"}},           # gated: no plan
+        {"tool": "finish", "args": {"final_response": "too early"}},           # 被拦截：尚未提交规划
         {"tool": "plan_flow", "args": PLAN},
         {"tool": "try_step", "args": {"source": STEP1}},
-        {"tool": "finish", "args": {"final_response": "too early"}},           # gated: write_body missing
-        {"tool": "try_step", "args": {"source": STEP2_BAD}},                   # fails -> not committed
+        {"tool": "finish", "args": {"final_response": "too early"}},           # 被拦截：缺少 write_body 步骤
+        {"tool": "try_step", "args": {"source": STEP2_BAD}},                   # 执行失败 -> 不提交该步骤
         {"tool": "observe", "args": {}},
         {"tool": "try_step", "args": {"source": STEP2}},
         {"tool": "finish", "args": {"final_response": "笔记已写好"}},
@@ -69,13 +69,13 @@ def test_author_records_then_task_reuses_flow(tmp_path):
     src = svc.store.read_source(flow["id"], 1)
     assert "STEP2_BAD" not in src and 'write_text(c.params.body' in src
     runs = svc.store.list_runs()
-    assert [r["kind"] for r in runs] == ["author"]  # default verify_replay=False avoids duplicate execution & tokens
+    assert [r["kind"] for r in runs] == ["author"]  # 默认 verify_replay=False，避免重复回放执行与额外 Token 消耗
     author_run = runs[0]
     st = {s["step_id"]: s for s in author_run["steps"]}
     assert st["write_body"]["status"] == "passed" and st["write_body"]["attempts"] == 2
     assert author_run["usage"]["llm_calls"] > 0
 
-    # a similar task is routed to the existing flow with new params (no Author involved -> saves tokens!)
+    # 相似任务会携带新参数直接路由到已有流程（无需录制者介入，节省 Token！）
     svc.llms._override["matcher"].script[0]["flow_id"] = flow["id"]
     t2 = svc.orchestrator.submit_task("写一篇标题为周报的笔记：本周完成")
     t2 = svc.orchestrator.process_task(t2["id"])

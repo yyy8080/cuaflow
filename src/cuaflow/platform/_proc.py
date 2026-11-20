@@ -1,4 +1,4 @@
-"""Small cross-platform process helpers (pid liveness, process-tree kill, detached spawn)."""
+"""轻量级跨平台进程辅助函数（PID 存活检测、进程树终止、分离式子进程启动）。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from typing import Any
 
 IS_WINDOWS = sys.platform == "win32"
 
-# Windows creation flags
+# Windows 进程创建标志
 CREATE_NEW_PROCESS_GROUP = 0x00000200
 DETACHED_PROCESS = 0x00000008
 CREATE_NO_WINDOW = 0x08000000
@@ -20,7 +20,7 @@ CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 
 
 def pid_alive(pid: int) -> bool:
-    """True if ``pid`` refers to a running (non-zombie) process."""
+    """若 ``pid`` 指向正在运行的非僵尸进程则返回 True。"""
     if not pid or pid <= 0:
         return False
     if IS_WINDOWS:
@@ -32,8 +32,8 @@ def pid_alive(pid: int) -> bool:
         kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
         handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
         if not handle:
-            # Access denied still means the process exists.
-            return ctypes.GetLastError() == 5  # ERROR_ACCESS_DENIED
+            # 拒绝访问（Access Denied）同样说明该进程仍然存在。
+            return ctypes.GetLastError() == 5  # Win32 错误码 ERROR_ACCESS_DENIED（拒绝访问）
         try:
             code = wintypes.DWORD()
             if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
@@ -47,13 +47,13 @@ def pid_alive(pid: int) -> bool:
         return False
     except PermissionError:
         return True
-    # Zombies answer kill(0) but are dead for our purposes.
+    # 僵尸进程虽然会响应 kill(0)，但对当前业务而言已视为死亡。
     stat = Path(f"/proc/{pid}/stat")
     try:
         if stat.exists():
             state = stat.read_text().rsplit(")", 1)[1].split()[0]
             if state in ("Z", "X"):
-                try:  # reap if it is our child
+                try:  # 若为当前进程的子进程则尝试回收
                     os.waitpid(pid, os.WNOHANG)
                 except (ChildProcessError, OSError):
                     pass
@@ -64,7 +64,7 @@ def pid_alive(pid: int) -> bool:
 
 
 def process_cmdline(pid: int) -> str:
-    """Best-effort command line of ``pid`` ("" if unknown)."""
+    """尽力获取 ``pid`` 对应的命令行字符串（未知时返回空字符串 ""）。"""
     try:
         import psutil  # type: ignore
 
@@ -79,11 +79,11 @@ def process_cmdline(pid: int) -> str:
 
 
 def kill_tree(pid: int, *, graceful_timeout: float = 0.0) -> None:
-    """Kill ``pid`` and all of its descendants.
+    """终止 ``pid`` 及其所有子孙进程。
 
-    On Windows uses ``taskkill /T [/F] /PID``; on POSIX signals the process group when ``pid``
-    leads its own group (``start_new_session=True``), otherwise just the pid.
-    If ``graceful_timeout`` > 0 a polite termination is attempted first.
+    在 Windows 上使用 ``taskkill /T [/F] /PID``；在 POSIX 系统上，当 ``pid`` 为进程组组长
+    （即 ``start_new_session=True``）时向整个进程组发送信号，否则仅向该 ``pid`` 发送信号。
+    若 ``graceful_timeout`` > 0，会先尝试温和终止并在超时后强制杀死。
     """
     if not pid or pid <= 0:
         return
@@ -127,7 +127,7 @@ def _wait_dead(pid: int, timeout: float) -> bool:
 
 
 def detached_popen_kwargs() -> dict[str, Any]:
-    """Popen kwargs that detach the child so it survives the parent process."""
+    """构造使子进程与父进程分离（父进程退出后仍可存活）的 Popen 关键字参数。"""
     if IS_WINDOWS:
         return {"creationflags": DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB}
     return {"start_new_session": True}
@@ -141,7 +141,7 @@ def spawn_detached(args: list[str], *, stdout: Any = subprocess.DEVNULL, stderr:
     try:
         return subprocess.Popen(args, **kwargs)  # noqa: S603
     except OSError:
-        if IS_WINDOWS:  # breakaway may be denied by the parent job object
+        if IS_WINDOWS:  # 父进程所在的作业对象（Job Object）可能拒绝脱离权限，此时降级重试
             kwargs["creationflags"] = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
             return subprocess.Popen(args, **kwargs)  # noqa: S603
         raise

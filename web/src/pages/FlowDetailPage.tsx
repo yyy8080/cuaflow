@@ -240,7 +240,7 @@ function RunPanel({ flow, onStarted }: { flow: FlowDetail; onStarted: (runId: st
 
   useEffect(() => {
     setRaw(initialRawValues(flow.params_schema));
-    // reset only when switching flows
+    // 仅在切换脚本时重置参数表单
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flow.id]);
 

@@ -1,4 +1,4 @@
-"""Tests for L1.5 Sentinel, Adaptive L2 escalation, Tier-2 Autonomous Fallback, output contract, checkpoint resume, and continuous schedules."""
+"""针对 L1.5 哨兵检查、自适应 L2 升级校验、二级 AI 自主接管兜底、输出契约、断点续跑与持续巡检调度的测试。"""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from cuaflow.services import Services
 def test_l15_sentinel_blocks_http_500_and_captcha():
     step = {"id": "open_dash", "title": "打开仪表盘", "expect": "显示今日统计"}
 
-    # Main-frame HTTP 500 -> immediate deterministic failure (0 tokens)
+    # 主文档返回 HTTP 500 -> 立即确定性判定失败（零 Token 消耗）
     r500 = {
         "step_id": "open_dash",
         "surfaces": ["browser"],
@@ -32,7 +32,7 @@ def test_l15_sentinel_blocks_http_500_and_captcha():
     sr = inspect_step(step, r500)
     assert not sr.passed and sr.blocker_kind == "http_error" and "502" in sr.detail
 
-    # Passive CAPTCHA detection -> immediate safe stop (blocker_kind="captcha")
+    # 被动检测到验证码 -> 立即安全停机（blocker_kind="captcha"）
     rcap = {
         "step_id": "open_dash",
         "surfaces": ["browser"],
@@ -87,18 +87,18 @@ def test_l15_adaptive_l2_wakes_judge_on_anomaly(tmp_path: Path):
     svc.update_settings(s)
     flow = svc.store.create_flow(load_flow(p)[0].meta(), flow_src)
 
-    # Run 1: clean -> L2 runs once because needs_verify=1 initially, then clears needs_verify=0
+    # 第 1 次运行：界面正常 -> 因初始 needs_verify=1 执行一次 L2 校验，随后将 needs_verify 清零
     r1 = svc.orchestrator.process_run(svc.orchestrator.submit_run(flow["id"], {"modal": False}, enqueue=False)["id"])
     assert r1["status"] == "succeeded"
     assert len(judge_calls) == 1
     assert svc.store.step_stats(flow["id"], "act")["needs_verify"] == 0
 
-    # Run 2: clean -> needs_verify==0 so L2 is NOT called (0 tokens!)
+    # 第 2 次运行：界面正常 -> 因 needs_verify==0 不再调用 L2（零 Token 消耗！）
     r2 = svc.orchestrator.process_run(svc.orchestrator.submit_run(flow["id"], {"modal": False}, enqueue=False)["id"])
     assert r2["status"] == "succeeded"
     assert len(judge_calls) == 1
 
-    # Run 3: new unexpected modal appears -> L1.5 Sentinel flags anomaly -> Adaptive L2 wakes up & catches failure!
+    # 第 3 次运行：出现意外模态弹窗 -> L1.5 哨兵标记异常 -> 自适应唤醒 L2 并捕获失败！
     r3 = svc.orchestrator.process_run(svc.orchestrator.submit_run(flow["id"], {"modal": True}, enqueue=False)["id"])
     assert r3["status"] == "failed"
     assert len(judge_calls) == 2
@@ -131,9 +131,9 @@ def test_supervisor_tier2_autonomous_fallback_recovers_run(tmp_path: Path):
     p = tmp_path / "f.py"
     p.write_text(flow_src, encoding="utf-8")
 
-    # Repairer gives up (pretending single-step patch can't generate external auth token file)
+    # 修复者放弃修复（模拟单步补丁无法生成外部鉴权令牌文件的场景）
     repairer_llm = FakeLLM([{"tool": "give_up", "args": {"reason": "requires interactive multi-step auth detour"}}])
-    # Tier-2 FallbackAgent interactively creates the missing auth file, updates c.state["secret"], and completes step!
+    # 二级兜底智能体交互式补齐缺失的鉴权文件，更新 c.state["secret"] 并完成当前步骤！
     fallback_llm = FakeLLM([
         {"tool": "python", "args": {"code": "from pathlib import Path; Path(c.state['target']).write_text('SEC-' + c.params.token, encoding='utf-8')"}},
         {"tool": "complete_step", "args": {"summary": "generated auth_data.txt and populated secret",
@@ -195,13 +195,13 @@ def test_output_contract_and_checkpoint_resume(tmp_path: Path):
     run = svc.orchestrator.submit_run(flow["id"], {}, enqueue=False)
     run_dir = svc.store.run_dir(run["id"])
 
-    # Simulate partial execution where step_one succeeded before crash
+    # 模拟崩溃前的部分执行：step_one 已成功跑完
     with RunnerClient(log_path=run_dir / "runner.log") as rc:
         rc.load(p, {}, run_dir, desktop="fake")
         res1 = rc.run_step("step_one")
         assert res1["status"] == "passed"
 
-    # Resume from checkpoint -> step_one is NOT re-executed (count stays 1), state is restored, step_two finishes!
+    # 从检查点断点续跑 -> step_one 不会重复执行（计数保持为 1），状态已恢复并顺利跑完 step_two！
     finished = svc.orchestrator.process_run(run["id"], resume_checkpoint=True)
     assert finished["status"] == "succeeded"
     assert finished["output"] == {"val": "from_s1_1_done"}
@@ -248,11 +248,11 @@ def test_continuous_schedules_and_circuit_breaker(tmp_path: Path):
     }).json()
     assert sc["status"] == "active"
 
-    # Healthy tick #1
+    # 第 1 次正常巡检触发
     u1 = svc.orchestrator.process_schedule(sc["id"])
     assert u1["runs_count"] == 1 and u1["success_count"] == 1 and u1["status"] == "active"
 
-    # Outage: 2 consecutive failures trip the circuit breaker!
+    # 故障模拟：连续 2 次失败触发熔断器！
     flag.write_text("down", encoding="utf-8")
     u2 = svc.orchestrator.process_schedule(sc["id"])
     assert u2["consecutive_failures"] == 1 and u2["status"] == "active"
@@ -262,6 +262,6 @@ def test_continuous_schedules_and_circuit_breaker(tmp_path: Path):
     stats = client.get("/api/stats").json()
     assert stats["schedules_tripped"] == 1 and stats["script_steps"] >= 1
 
-    # Reset breaker via API
+    # 通过 API 重置熔断器
     reset = client.patch(f"/api/schedules/{sc['id']}", json={"reset_breaker": True}).json()
     assert reset["status"] == "active" and reset["consecutive_failures"] == 0 and reset["enabled"] is True

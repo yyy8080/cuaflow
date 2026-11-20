@@ -1,4 +1,4 @@
-"""FastAPI server implementing docs/api.md (REST + WebSocket) and serving the web console."""
+"""实现 docs/api.md 规范（REST + WebSocket）并托管 Web 控制台的 FastAPI 服务端。"""
 
 from __future__ import annotations
 
@@ -86,7 +86,7 @@ def create_app(svc: Services, token: str | None = None) -> FastAPI:
             raise HTTPException(404, f"{what} not found")
         return obj
 
-    # ------------------------------------------------------------------ health & stats
+    # ------------------------------------------------------------------ 健康检查与统计信息
     @app.get("/api/health")
     def health() -> dict[str, Any]:
         return {"ok": True, "version": __version__, "platform": sys.platform}
@@ -95,7 +95,7 @@ def create_app(svc: Services, token: str | None = None) -> FastAPI:
     def stats() -> dict[str, Any]:
         return store.global_stats()
 
-    # ------------------------------------------------------------------ flows
+    # ------------------------------------------------------------------ 工作流管理
     @app.get("/api/flows", dependencies=A)
     def flows() -> list[dict[str, Any]]:
         return store.list_flows()
@@ -134,7 +134,7 @@ def create_app(svc: Services, token: str | None = None) -> FastAPI:
         store.delete_flow(flow_id)
         return {"ok": True}
 
-    # ------------------------------------------------------------------ tasks (missions)
+    # ------------------------------------------------------------------ 任务（长程使命）管理
     @app.post("/api/tasks", dependencies=A)
     def create_task(req: TaskRequest) -> dict[str, Any]:
         if not req.instruction.strip():
@@ -167,7 +167,7 @@ def create_app(svc: Services, token: str | None = None) -> FastAPI:
         orch.abort(task_id)
         return store.get_task(task_id)  # type: ignore[return-value]
 
-    # ------------------------------------------------------------------ schedules (continuous monitors)
+    # ------------------------------------------------------------------ 定时计划（持续巡检监控）
     @app.get("/api/schedules", dependencies=A)
     def list_schedules() -> list[dict[str, Any]]:
         return store.list_schedules()
@@ -231,7 +231,7 @@ def create_app(svc: Services, token: str | None = None) -> FastAPI:
         store.delete_schedule(schedule_id)
         return {"ok": True}
 
-    # ------------------------------------------------------------------ runs
+    # ------------------------------------------------------------------ 运行记录与产物
     @app.get("/api/runs", dependencies=A)
     def runs(flow_id: str | None = None, limit: int = Query(100, le=1000)) -> list[dict[str, Any]]:
         return store.list_runs(flow_id, limit)
@@ -262,7 +262,7 @@ def create_app(svc: Services, token: str | None = None) -> FastAPI:
                 svc.tickets.resolve(t["id"], "abort", "run aborted")
         return store.get_run(run_id)  # type: ignore[return-value]
 
-    # ------------------------------------------------------------------ tickets
+    # ------------------------------------------------------------------ 人工介入工单
     @app.get("/api/tickets", dependencies=A)
     def tickets(status: str | None = None) -> list[dict[str, Any]]:
         return store.list_tickets(status)
@@ -275,7 +275,7 @@ def create_app(svc: Services, token: str | None = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from None
 
-    # ------------------------------------------------------------------ settings
+    # ------------------------------------------------------------------ 系统设置
     @app.get("/api/settings", dependencies=A)
     def get_settings() -> dict[str, Any]:
         from cuaflow.config import masked_settings_dict
@@ -295,7 +295,7 @@ def create_app(svc: Services, token: str | None = None) -> FastAPI:
             raise HTTPException(422, str(exc)) from None
         return masked_settings_dict(svc.update_settings(s))
 
-    # ------------------------------------------------------------------ websocket
+    # ------------------------------------------------------------------ WebSocket 实时事件流
     @app.websocket("/ws/events")
     async def ws_events(ws: WebSocket) -> None:
         if not secrets.compare_digest(ws.query_params.get("token", ""), token):
@@ -346,7 +346,7 @@ def create_app(svc: Services, token: str | None = None) -> FastAPI:
             unsubscribe()
             rtask.cancel()
 
-    # ------------------------------------------------------------------ SPA
+    # ------------------------------------------------------------------ 单页应用（SPA）静态资源回退
     @app.get("/{path:path}", include_in_schema=False)
     def spa(path: str):
         if path.startswith(("api/", "ws/")):

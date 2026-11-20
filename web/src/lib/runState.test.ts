@@ -61,8 +61,8 @@ describe('runReducer', () => {
     let s = withRun();
     const a = ev('step_start', { index: 0 }, { step_id: 'open' });
     const b = ev('check', { level: 'L0', passed: false, detail: 'x' }, { step_id: 'open' });
-    s = apply(s, b, a); // out of order
-    s = apply(s, a, b); // duplicates
+    s = apply(s, b, a); // 乱序到达
+    s = apply(s, a, b); // 重复投递
     expect(s.events.map((e) => e.seq)).toEqual([a.seq, b.seq]);
     expect(s.run!.steps[0].attempts).toBe(1);
     expect(s.run!.steps[0].checks).toHaveLength(1);

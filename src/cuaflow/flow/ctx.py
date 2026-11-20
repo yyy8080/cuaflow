@@ -1,4 +1,4 @@
-"""Step execution context passed to every step function as ``c``."""
+"""步骤执行上下文，作为参数 ``c`` 传递给每个步骤函数。"""
 
 from __future__ import annotations
 
@@ -70,7 +70,7 @@ class Ctx:
         self._log_path = self.run_dir / "flow_log.txt"
         self._snap_seq = 0
 
-    # --- lazily-connected backends -------------------------------------
+    # --- 惰性连接的后端 -------------------------------------------------
     @property
     def browser(self) -> BrowserBackend:
         if self._browser is None or not self._browser.is_connected():
@@ -97,7 +97,7 @@ class Ctx:
         return self._browser is not None and self._browser.is_connected()
 
     def attach_live_browser(self) -> BrowserBackend | None:
-        """Attach to an already-running browser session if one exists (never launches a new browser)."""
+        """若已有运行中的浏览器会话则直接挂载连接（绝不主动启动新浏览器）。"""
         if self.has_browser():
             return self._browser
         if self._browser_probe is None:
@@ -111,7 +111,7 @@ class Ctx:
         return self._browser if self.has_browser() else None
 
     def peek_desktop(self) -> DesktopBackend:
-        """Desktop backend without marking it as used by the current step."""
+        """获取桌面后端，但不将其标记为当前步骤已使用。"""
         if self._desktop is None:
             self._desktop = self._desktop_factory()
         return self._desktop
@@ -119,7 +119,7 @@ class Ctx:
     def peek_browser(self) -> BrowserBackend | None:
         return self._browser if self.has_browser() else None
 
-    # --- helpers ---------------------------------------------------------
+    # --- 辅助方法 -------------------------------------------------------
     def log(self, *parts: Any) -> None:
         line = " ".join(str(p) for p in parts)
         stamp = time.strftime("%H:%M:%S")
@@ -128,7 +128,7 @@ class Ctx:
         print(line)
 
     def snap(self, name: str = "snap", surface: str | None = None) -> Path:
-        """Take a screenshot of the browser page (if used) or the desktop."""
+        """对浏览器页面（若已使用）或桌面进行截图。"""
         self._snap_seq += 1
         self.shots_dir.mkdir(parents=True, exist_ok=True)
         path = self.shots_dir / f"{self.current_step or 'adhoc'}_{self._snap_seq:03d}_{name}.png"
@@ -138,7 +138,7 @@ class Ctx:
         return self.peek_desktop().screenshot(path)
 
     def state_json(self) -> dict[str, Any]:
-        """JSON-safe snapshot of ``state`` (non-serializable values are stringified)."""
+        """返回 ``state`` 的 JSON 安全快照（不可序列化的值会转为字符串）。"""
         return json.loads(json.dumps(self.state, default=str, ensure_ascii=False))
 
     def close(self) -> None:

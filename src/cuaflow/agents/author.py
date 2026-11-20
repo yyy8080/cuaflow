@@ -1,4 +1,4 @@
-"""Author agent: accomplishes a new task while recording it as a step-based flow ("record while doing")."""
+"""录制智能体 `Author`：在完成新任务的同时将其录制为分步流程（“边执行边录制”）。"""
 
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ class AuthorSession:
         self._unattended = unattended
         self._extra_tags = list(extra_tags or [])
 
-    # ------------------------------------------------------------------ draft helpers
+    # ------------------------------------------------------------------ 草稿辅助方法
     def _source(self) -> str:
         return self.draft.read_text(encoding="utf-8")
 
@@ -65,7 +65,7 @@ class AuthorSession:
         order = [i for i in self._plan_ids() if i in present] + [i for i in present if i not in self._plan_ids()]
         return reorder_steps(src, order) if present and order != present else src
 
-    # ------------------------------------------------------------------ tools
+    # ------------------------------------------------------------------ 工具实现
     def plan_flow(self, a: dict[str, Any]) -> ToolResult:
         steps = a.get("steps") or []
         ids = [s.get("id", "") for s in steps]
@@ -167,7 +167,7 @@ class AuthorSession:
             raise Cancelled()
         return res.get("hint") or "(no answer — proceed with your best judgement)"
 
-    # ------------------------------------------------------------------ main
+    # ------------------------------------------------------------------ 主执行逻辑
     def run(self) -> dict[str, Any]:
         s = self.d.settings()
         meter = UsageMeter(tokens_per_script_step=s.planner.tokens_saved_per_step)

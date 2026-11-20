@@ -1,8 +1,7 @@
-"""LLM judges (Supervisor L2 per-step visual check and L3 task-level verdict).
+"""LLM 评审器（`Supervisor` L2 级单步视觉校验与 L3 级任务整体裁决）。
 
-Adapted from upstream ``self_reflection.py``: instead of a two-stage per-image score + final
-verdict over a whole run, each step is judged against its own natural-language expectation,
-which localizes failures to a single step.
+改编自上游 ``self_reflection.py``：不再对整次运行采用“逐图打分 + 最终裁决”的两阶段评估，
+而是将每个步骤对照其自身的自然语言预期结果独立判定，从而把故障精确定位到单个步骤。
 """
 
 from __future__ import annotations
@@ -41,7 +40,7 @@ def _verdict(llm: LLM, messages: list[dict[str, Any]]) -> dict[str, Any]:
 
 def judge_step(llm: LLM, step: dict[str, Any], result: dict[str, Any], run_dir: Path,
                intent: str = "", extra_warnings: list[str] | None = None) -> dict[str, Any]:
-    """Return {"passed": bool|None, "reason": str}. ``None`` means the judge could not decide."""
+    """返回 `{"passed": bool|None, "reason": str}`；其中 ``None`` 表示评审器无法作出判定。"""
     obs = result.get("observation") or {}
     ctx_lines = [
         f"Overall task: {intent}" if intent else "",

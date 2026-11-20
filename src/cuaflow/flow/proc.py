@@ -1,10 +1,10 @@
-"""Runner child process: ``python -m cuaflow.flow.proc``.
+"""Runner 子进程入口：``python -m cuaflow.flow.proc``。
 
-Line-delimited JSON-RPC over stdin/stdout. The original stdout fd is reserved for the protocol;
-fd 1 is re-pointed at stderr so stray prints from steps / native libraries cannot corrupt it.
+通过标准输入/输出进行按行分隔的 JSON-RPC 通信。原始 stdout 文件描述符专用于协议传输；
+fd 1 会重定向至 stderr，防止步骤代码或原生库的额外打印破坏协议流。
 
-Request:  {"id": 1, "cmd": "run_step", "args": {...}}
-Response: {"id": 1, "ok": true, "result": ...} | {"id": 1, "ok": false, "error": "...", "traceback": "..."}
+请求格式: {"id": 1, "cmd": "run_step", "args": {...}}
+响应格式: {"id": 1, "ok": true, "result": ...} | {"id": 1, "ok": false, "error": "...", "traceback": "..."}
 """
 
 from __future__ import annotations

@@ -1,16 +1,12 @@
-# cuaflow HTTP / WebSocket API contract
+# cuaflow HTTP / WebSocket API 契约
 
-All endpoints are served by `cuaflow serve` (FastAPI) on `127.0.0.1:8765` by default.
+所有接口默认由 `cuaflow serve`（基于 FastAPI）在 `127.0.0.1:8765` 上提供服务。
 
-**Auth**: every `/api/*` request (except `/api/health`) and WebSocket must carry the access token,
-either as `Authorization: Bearer <token>` header or `?token=<token>` query parameter. `cuaflow serve`
-prints `http://127.0.0.1:8765/?token=<token>`; the web console reads `token` from the URL once,
-stores it in `localStorage["cuaflow_token"]`, and strips it from the address bar.
-A missing / wrong token returns `401`.
+**鉴权**：除 `/api/health` 外的所有 `/api/*` 请求及 WebSocket 连接均须携带访问令牌，可通过 `Authorization: Bearer <token>` 请求头或 `?token=<token>` 查询参数传递。`cuaflow serve` 启动时会打印 `http://127.0.0.1:8765/?token=<token>`；Web 控制台首次从 URL 读取 `token` 后，会将其存入 `localStorage["cuaflow_token"]` 并从地址栏移除。缺失或错误的令牌将返回 `401`。
 
-Timestamps are ISO-8601 strings (UTC). IDs are short strings.
+时间戳均为 ISO-8601 字符串（UTC），各类 ID 均为短字符串。
 
-## Data models
+## 数据模型
 
 ```ts
 type ParamSpec = { type: "str" | "int" | "float" | "bool"; description?: string; default?: any; required?: boolean };
@@ -136,41 +132,41 @@ type Ticket = {
 };
 ```
 
-## REST endpoints
+## REST 接口
 
-| Method | Path | Body | Returns |
+| 方法 | 路径 | 请求体 / 参数 | 返回值 |
 |---|---|---|---|
-| GET | `/api/health` | – | `{ok: true, version, platform}` (no auth) |
-| GET | `/api/stats` | – | `GlobalStats` (tokens, script savings, stability, schedules) |
+| GET | `/api/health` | – | `{ok: true, version, platform}`（无需鉴权） |
+| GET | `/api/stats` | – | `GlobalStats`（Token 消耗、脚本节省量、稳定性与定时监控统计） |
 | GET | `/api/flows` | – | `Flow[]` |
-| GET | `/api/flows/{id}` | – | `Flow & {versions: Version[]}` (no source/diff) |
-| GET | `/api/flows/{id}/versions/{v}` | – | `Version` with `source` and `diff` |
+| GET | `/api/flows/{id}` | – | `Flow & {versions: Version[]}`（不含 `source` 与 `diff`） |
+| GET | `/api/flows/{id}/versions/{v}` | – | 含 `source` 与 `diff` 的 `Version` |
 | POST | `/api/flows/{id}/run` | `{params, version?, from_step?, resume_checkpoint?, unattended?}` | `Run` |
 | POST | `/api/flows/{id}/rollback` | `{version}` | `Flow` |
 | DELETE | `/api/flows/{id}` | – | `{ok: true}` |
 | POST | `/api/tasks` | `{instruction, start_url?, params?, force_new?, mode?: "auto"\|"mission"\|"single"}` | `Task` |
-| GET | `/api/tasks` | – | `Task[]` (newest first) |
+| GET | `/api/tasks` | – | `Task[]`（按最新优先排序） |
 | GET | `/api/tasks/{id}` | – | `Task` |
-| GET | `/api/tasks/{id}/events` | query `after_seq?` | `Event[]` |
-| POST | `/api/tasks/{id}/resume` | – | `Task` (resumes from saved checkpoint) |
+| GET | `/api/tasks/{id}/events` | 查询参数 `after_seq?` | `Event[]` |
+| POST | `/api/tasks/{id}/resume` | – | `Task`（从已保存的检查点恢复执行） |
 | POST | `/api/tasks/{id}/abort` | – | `Task` |
 | GET | `/api/schedules` | – | `Schedule[]` |
 | POST | `/api/schedules` | `{name, interval_seconds, kind, flow_id?, instruction?, params?, max_consecutive_failures?, run_immediately?}` | `Schedule` |
 | PATCH | `/api/schedules/{id}` | `{enabled?, interval_seconds?, max_consecutive_failures?, reset_breaker?}` | `Schedule` |
 | POST | `/api/schedules/{id}/trigger` | – | `{ok: true, schedule}` |
 | DELETE | `/api/schedules/{id}` | – | `{ok: true}` |
-| GET | `/api/runs` | query `flow_id?`, `limit?` | `Run[]` |
+| GET | `/api/runs` | 查询参数 `flow_id?`、`limit?` | `Run[]` |
 | GET | `/api/runs/{id}` | – | `Run` |
-| GET | `/api/runs/{id}/events` | query `after_seq?` | `Event[]` |
-| GET | `/api/runs/{id}/artifacts/{path}` | – | file (screenshots, logs) |
+| GET | `/api/runs/{id}/events` | 查询参数 `after_seq?` | `Event[]` |
+| GET | `/api/runs/{id}/artifacts/{path}` | – | 产物文件（截图、日志等） |
 | POST | `/api/runs/{id}/abort` | – | `Run` |
-| GET | `/api/tickets` | query `status?` | `Ticket[]` |
+| GET | `/api/tickets` | 查询参数 `status?` | `Ticket[]` |
 | POST | `/api/tickets/{id}/resolve` | `{action, hint?}` | `Ticket` |
 | GET | `/api/settings` | – | `Settings` |
 | PUT | `/api/settings` | `Settings` | `Settings` |
 
 ## WebSocket
 
-`/ws/events?token=...` — server pushes every `Event` as a JSON text frame, in `seq` order.
-Clients may send `{"subscribe": {"run_id": "..."}}` or `{"subscribe": {"task_id": "..."}}` to filter,
-or `{"subscribe": {}}` for all.
+`/ws/events?token=...` — 服务端按 `seq` 顺序将每条 `Event` 以 JSON 文本帧推送给客户端。
+客户端可发送 `{"subscribe": {"run_id": "..."}}` 或 `{"subscribe": {"task_id": "..."}}` 按条件过滤，
+也可发送 `{"subscribe": {}}` 订阅全部事件。

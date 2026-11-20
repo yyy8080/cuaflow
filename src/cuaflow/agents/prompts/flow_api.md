@@ -12,9 +12,9 @@ from cuaflow.flow import Ctx, Flow, expect
 
 flow = Flow(name="...", params={"query": {"type": "str", "description": "..."}}, output={"price": "str"})
 
-@flow.step("Open search page", expect="Search box is visible", timeout=60, retries=0)
+@flow.step("打开搜索页", expect="搜索框可见", timeout=60, retries=0)
 def open_search(c: Ctx):
-    page = c.browser.page()                  # Playwright sync Page in a persistent Chromium/Edge
+    page = c.browser.page()                  # 常驻 Chromium/Edge 中的 Playwright 同步 Page 对象
     page.goto(c.params.start_url)
     expect.visible(page.get_by_role("searchbox"))
 ```

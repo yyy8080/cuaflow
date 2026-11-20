@@ -81,7 +81,7 @@ def test_supervisor_repairs_and_versions(tmp_path):
     types = [e["type"] for e in events]
     for t in ("step_start", "step_end", "check", "repair_start", "repair_end", "version_created", "run_status"):
         assert t in types
-    # next run on v2 passes with no repair
+    # 基于 v2 版本的下一次运行无需修复即可直接通过
     run2 = svc.orchestrator.submit_run(flow["id"], {"word": "again"}, enqueue=False)
     run2 = svc.orchestrator.process_run(run2["id"])
     assert run2["status"] == "succeeded" and run2["new_version"] is None and run2["version"] == 2
@@ -114,7 +114,7 @@ def test_supervisor_escalates_to_human(tmp_path):
 
 
 def test_l2_judge_failure_triggers_repair(tmp_path):
-    # judge says the 'report' step is wrong once, repairer re-applies it
+    # 视觉裁判首次判定 report 步骤未通过，由修复者补丁重跑后通过
     calls = {"n": 0}
 
     def judge(m, t):

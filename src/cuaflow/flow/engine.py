@@ -1,9 +1,8 @@
-"""In-process flow engine: executes single steps against a live Ctx and records checkpoints.
+"""进程内流程引擎：针对实时 `Ctx` 单步执行流程并记录检查点。
 
-The engine runs inside the Runner child process (see :mod:`cuaflow.flow.proc`) and is driven
-step-by-step by a controller (Supervisor / Author) in the parent process. Because browser
-pages, windows and ``c.state`` stay alive in the child between commands, a failing step can be
-patched (``replace_step``) and retried without restarting the flow.
+该引擎运行在 Runner 子进程内部（参见 :mod:`cuaflow.flow.proc`），由父进程中的控制器
+（`Supervisor` / `Author`）逐步驱动。由于浏览器页面、系统窗口及 ``c.state`` 在命令之间持续存活，
+失败的步骤可原位热修补（``replace_step``）并立即重试，无需重头重启整个流程。
 """
 
 from __future__ import annotations
@@ -158,7 +157,7 @@ class FlowEngine:
     # ------------------------------------------------------------------
     def observation(self, surface: str | None = None, tag: str = "obs", detail: bool = False,
                     max_chars: int = 12000) -> dict[str, Any]:
-        """Screenshot + lightweight context; with ``detail`` also ARIA / UIA tree text."""
+        """采集截图与轻量上下文；当 ``detail`` 为真时一并采集 ARIA / UIA 树文本。"""
         c = self.ctx
         if detail and not c.has_browser():
             c.attach_live_browser()
@@ -194,7 +193,7 @@ class FlowEngine:
         return obs
 
     def heal_browser(self, keep_tabs: int = 6) -> dict[str, Any]:
-        """Zero-token deterministic browser recovery: reconnect CDP, prune leaked tabs, dismiss safe overlays."""
+        """零 Token 确定性浏览器自愈：重连 CDP、清理泄漏标签页、关闭安全遮罩弹窗。"""
         c = self.ctx
         info: dict[str, Any] = {"used_browser": False, "reconnected": False, "tabs_closed": 0, "dismissed": []}
         if not c.has_browser() and self._browser_touched():
@@ -226,11 +225,11 @@ class FlowEngine:
     # ------------------------------------------------------------------
     def replace_step(self, step_source: str, expected_id: str | None = None) -> dict[str, Any]:
         sid = validate_step_source(step_source, expected_id)
-        exec(compile(step_source, f"<patch:{sid}>", "exec"), self.ns)  # re-registers via @flow.step
+        exec(compile(step_source, f"<patch:{sid}>", "exec"), self.ns)  # 通过 @flow.step 重新注册步骤
         return {"step_id": sid, "steps": self.steps}
 
     def exec_code(self, code: str) -> dict[str, Any]:
-        """Run an exploratory snippet with ``c``, ``expect`` and ``flow`` in scope."""
+        """在包含 ``c``、``expect`` 和 ``flow`` 的作用域中执行探索性代码片段。"""
         buf = io.StringIO()
         scope = {**self.ns, "c": self.ctx, "expect": expect_mod, "flow": self.flow}
         try:
@@ -257,7 +256,7 @@ class FlowEngine:
 
 
 def latest_checkpoint_state(run_dir: str | Path) -> tuple[dict[str, Any], list[str]]:
-    """Return (state after the last passed step, ids of passed steps) from ``steps.jsonl``."""
+    """从 ``steps.jsonl`` 中返回（最后一个通过步骤之后的状态，已通过步骤的 ID 列表）。"""
     path = Path(run_dir) / "steps.jsonl"
     state: dict[str, Any] = {}
     passed: list[str] = []

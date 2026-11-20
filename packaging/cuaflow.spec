@@ -1,8 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec producing standalone cuaflow directory bundle:
-- cuaflow-desktop(.exe): GUI launcher + local server + background scheduler
-- cuaflow(.exe):         CLI (do, resume, serve, flows, schedules, stats, doctor, install-browser)
-- cuaflow-tool(.exe):    Agent shell helper
+"""用于构建 cuaflow 独立目录发行包的 PyInstaller 配置文件：
+- cuaflow-desktop(.exe)：图形界面启动器 + 本地服务端 + 后台调度器
+- cuaflow(.exe)：        命令行工具（do、resume、serve、flows、schedules、stats、doctor、install-browser）
+- cuaflow-tool(.exe)：   智能体命令行辅助工具
 """
 
 from __future__ import annotations
@@ -23,12 +23,12 @@ datas: list[tuple[str, str]] = []
 binaries: list[tuple[str, str]] = []
 hiddenimports: list[str] = []
 
-# Bundle cuaflow prompts, config, and compiled Web Console static files
+# 打包 cuaflow 提示词模板、默认配置以及编译后的 Web 控制台静态资源
 datas += collect_data_files("cuaflow")
 if ICO_PATH.is_file():
     datas.append((str(ICO_PATH), "."))
 
-# Bundle Playwright Python client + Node CDP driver (lightweight; browsers live outside unless requested)
+# 打包 Playwright Python 客户端与 Node CDP 驱动（体积轻量；除非显式指定，否则不包含浏览器本体）
 pw_datas, pw_bins, pw_hidden = collect_all("playwright")
 datas += pw_datas
 binaries += pw_bins
@@ -40,13 +40,13 @@ for pkg_meta in ("cuaflow", "playwright", "fastapi", "uvicorn", "pydantic", "htt
     except Exception:
         pass
 
-# Optional full-offline Chromium bundle when CUAFLOW_BUNDLE_CHROMIUM=1
+# 当 CUAFLOW_BUNDLE_CHROMIUM=1 时，可选打包完整离线版 Chromium 浏览器
 if os.environ.get("CUAFLOW_BUNDLE_CHROMIUM", "").strip().lower() in ("1", "true", "yes"):
     pw_browsers = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
     if pw_browsers and Path(pw_browsers).is_dir():
         datas.append((pw_browsers, "ms-playwright"))
 
-# Include all cuaflow submodules + dynamic Uvicorn/FastAPI imports + common stdlib/automation modules used in @flow.step
+# 纳入全部 cuaflow 子模块、Uvicorn/FastAPI 动态导入项，以及 @flow.step 中常用的标准库与自动化模块
 hiddenimports += collect_submodules("cuaflow")
 hiddenimports += collect_submodules("uvicorn")
 hiddenimports += [
@@ -58,7 +58,7 @@ hiddenimports += [
     "yaml",
     "dotenv",
     "multipart",
-    # Common stdlib modules imported dynamically by recorded Flow scripts
+    # 录制的 Flow 脚本常会动态导入的标准库模块
     "csv",
     "sqlite3",
     "decimal",

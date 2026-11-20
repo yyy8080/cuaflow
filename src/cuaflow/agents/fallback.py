@@ -1,4 +1,4 @@
-"""Autonomous FallbackAgent: recovers live browser/desktop state when single-step code repair is insufficient."""
+"""自主兜底智能体 `FallbackAgent`：当单步代码修补不足以恢复时，交互式修复实时浏览器或桌面状态。"""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ class FallbackOutcome:
 
 
 class FallbackAgent:
-    """Tier-2 autonomous takeover: interactively recovers live state so a stalled flow can continue."""
+    """第 2 级自主接管：通过交互式操作恢复实时状态，使受阻流程得以继续推进。"""
 
     def __init__(
         self,

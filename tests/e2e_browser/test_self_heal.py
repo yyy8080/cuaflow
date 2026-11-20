@@ -1,4 +1,4 @@
-"""End-to-end self-heal with a real (headless) Chromium against a local site that changes its UI."""
+"""基于真实无头 Chromium 的端到端自愈测试：针对界面发生改版的本地站点验证自动修复。"""
 
 import functools
 import http.server
@@ -120,12 +120,12 @@ def test_browser_flow_self_heals_after_ui_change(tmp_path, site, session_file):
     p.write_text(src, encoding="utf-8")
     flow = svc.store.create_flow(load_flow(p)[0].meta(), src)
 
-    # 1) original site: flow passes untouched
+    # 1) 初始版站点：原流程无需改动直接通过
     r1 = svc.orchestrator.process_run(svc.orchestrator.submit_run(flow["id"], {"q": "华东"}, enqueue=False)["id"])
     assert r1["status"] == "succeeded", r1.get("error")
     assert r1["output"] == {"result": "已导出: 华东"} and r1["new_version"] is None
 
-    # 2) site changes (renamed button + cookie overlay): supervisor detects, repairer patches live
+    # 2) 站点界面改版（按钮改名 + 新增 Cookie 遮罩）：监督者检测失败并由修复者在线热补丁修复
     (root / "index.html").write_text(V2, encoding="utf-8")
     r2 = svc.orchestrator.process_run(svc.orchestrator.submit_run(flow["id"], {"q": "华南"}, enqueue=False)["id"])
     assert r2["status"] == "succeeded", r2.get("error")
@@ -136,7 +136,7 @@ def test_browser_flow_self_heals_after_ui_change(tmp_path, site, session_file):
     v2 = svc.store.get_version(flow["id"], 2)
     assert v2["repaired_step"] == "open_page,export" and "接受" in v2["source"]
 
-    # 3) the repaired version now runs cleanly with no LLM repair (script exhausted would raise)
+    # 3) 修复后的新版本直接干净跑通，不再触发大模型修复（若仍调用修复脚本则会因耗尽而报错）
     r3 = svc.orchestrator.process_run(svc.orchestrator.submit_run(flow["id"], {"q": "西北"}, enqueue=False)["id"])
     assert r3["status"] == "succeeded" and r3["version"] == 2 and r3["new_version"] is None
     assert r3["output"] == {"result": "已导出: 西北"}

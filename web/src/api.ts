@@ -1,4 +1,4 @@
-// Typed client for the cuaflow HTTP API. Types mirror docs/api.md (authoritative).
+// cuaflow HTTP API 的强类型客户端，类型定义与 docs/api.md（权威契约）保持一致。
 
 export type ParamType = 'str' | 'int' | 'float' | 'bool';
 export type ParamSpec = { type: ParamType; description?: string; default?: any; required?: boolean };
@@ -269,11 +269,11 @@ export type CuaEvent = {
   data: Record<string, any>;
 };
 
-// ---------------------------------------------------------------- auth
+// ---------------------------------------------------------------- 鉴权
 
 export const TOKEN_KEY = 'cuaflow_token';
 
-/** Read `?token=` from the URL once, persist it, and strip it from the address bar. */
+/** 从 URL 中一次性读取 `?token=`，持久化保存后将其从地址栏移除。 */
 export function initToken(): void {
   try {
     const url = new URL(window.location.href);
@@ -285,7 +285,7 @@ export function initToken(): void {
       window.history.replaceState(window.history.state, '', url.pathname + (qs ? `?${qs}` : '') + url.hash);
     }
   } catch {
-    /* ignore */
+    /* 忽略异常 */
   }
 }
 
@@ -328,7 +328,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
       const j = await res.json();
       if (j && (j.detail || j.error)) msg = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail ?? j.error);
     } catch {
-      /* ignore */
+      /* 忽略异常 */
     }
     throw new ApiError(res.status, msg);
   }
@@ -345,7 +345,7 @@ function qs(params: Record<string, string | number | undefined>): string {
 
 const enc = encodeURIComponent;
 
-/** URL for an artifact (screenshots etc.); token goes in the query because <img> cannot set headers. */
+/** 生成运行产物（如截图等）的访问地址；由于 <img> 无法自定义请求头，令牌通过查询参数传递。 */
 export function artifactUrl(runId: string, path: string): string {
   const clean = path.replace(/^\/+/, '').split('/').map(enc).join('/');
   return `/api/runs/${enc(runId)}/artifacts/${clean}?token=${enc(getToken())}`;

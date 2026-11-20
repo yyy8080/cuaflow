@@ -1,14 +1,14 @@
-// WebSocket event stream with auto-reconnect + exponential backoff.
+// 支持自动重连与指数退避的 WebSocket 事件流客户端。
 import { useEffect, useRef, useState } from 'react';
 import { wsUrl, type CuaEvent } from './api';
 
 export type WsStatus = 'connecting' | 'open' | 'closed';
 
 export type EventSocketOptions = {
-  /** Restrict to one run; omit for all events. */
+  /** 仅订阅指定运行 ID 的事件；省略则订阅全部事件。 */
   runId?: string;
   onEvent: (ev: CuaEvent) => void;
-  /** Called after every (re)connect + subscribe, e.g. to backfill missed events via REST. */
+  /** 每次连接（或重连）并完成订阅后触发，可用于通过 REST 接口补拉断线期间遗漏的事件。 */
   onOpen?: () => void;
   onStatus?: (s: WsStatus) => void;
 };
@@ -38,7 +38,7 @@ export class EventSocket {
       try {
         this.ws.close();
       } catch {
-        /* ignore */
+        /* 忽略异常 */
       }
     }
     this.ws = null;
@@ -68,11 +68,11 @@ export class EventSocket {
         const list: CuaEvent[] = Array.isArray(data) ? data : [data];
         for (const ev of list) if (ev && typeof ev.seq === 'number' && ev.type) this.opts.onEvent(ev);
       } catch {
-        /* ignore malformed frames */
+        /* 忽略格式错误的消息帧 */
       }
     };
     ws.onerror = () => {
-      /* onclose follows */
+      /* 随后会触发 onclose */
     };
     ws.onclose = () => {
       this.ws = null;
@@ -90,8 +90,8 @@ export class EventSocket {
 }
 
 /**
- * React hook wrapping EventSocket. Handlers are read through a ref so they can change
- * between renders without reconnecting; only `runId` / `enabled` changes reconnect.
+ * 封装 EventSocket 的 React Hook。回调函数通过 ref 读取，因此在重渲染间更新回调不会触发重连；
+ * 仅当 `runId` 或 `enabled` 变化时才会重新建立连接。
  */
 export function useEventSocket(opts: EventSocketOptions & { enabled?: boolean }): WsStatus {
   const [status, setStatus] = useState<WsStatus>('connecting');

@@ -1,4 +1,4 @@
-"""OpenAI-compatible Chat Completions backend (GPT, DeepSeek, Qwen/DashScope, vLLM, Ollama...)."""
+"""兼容 OpenAI Chat Completions 协议的后端（支持 GPT、DeepSeek、Qwen/DashScope、vLLM、Ollama 等）。"""
 
 from __future__ import annotations
 
@@ -83,7 +83,7 @@ class ChatCompletionsLLM:
                     for p in m["content"]
                 ]
             if json_tools is not None:
-                # flatten native tool traffic into plain text turns
+                # 将原生工具调用消息展平为纯文本对话轮次
                 if m["role"] == "assistant" and m.get("tool_calls"):
                     tc = m["tool_calls"][0]["function"]
                     m = {"role": "assistant", "content": json.dumps(

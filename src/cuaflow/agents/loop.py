@@ -1,8 +1,8 @@
-"""Generic tool-calling agent loop (refactored from upstream CUAWright ``DefaultAgent``).
+"""通用工具调用智能体循环（重构自上游 CUAWright 的 ``DefaultAgent``）。
 
-Each turn: query the LLM with the running transcript + tools, execute every returned tool call,
-append results (text as ``tool`` messages, images as a follow-up ``user`` message). Context is
-bounded by pruning old screenshots and compacting the transcript into a summary when large.
+每轮迭代：携带当前对话记录与工具列表调用 LLM，依次执行返回的全部工具调用，
+并追加执行结果（文本作为 ``tool`` 消息，图像作为后续 ``user`` 消息）。
+通过裁剪旧截图并在上下文过大时将其压缩为交接摘要，控制上下文规模。
 """
 
 from __future__ import annotations

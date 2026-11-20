@@ -1,4 +1,4 @@
-"""PyInstaller entrypoint for the cuaflow CLI."""
+"""cuaflow 命令行工具的 PyInstaller 打包入口。"""
 
 from cuaflow.cli import main
 

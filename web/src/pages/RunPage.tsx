@@ -14,7 +14,7 @@ import { useEventSocket, type WsStatus } from '../ws';
 
 const WS_LABEL: Record<WsStatus, string> = { connecting: '连接中', open: '实时', closed: '已断开，重连中' };
 
-/** Pick the step to show when the user hasn't pinned one: the live step, else the last touched one. */
+/** 当用户未手动锁定步骤时自动选择展示的步骤：优先当前执行/修复中的步骤，其次失败步骤，否则取最近执行过的步骤。 */
 function autoStep(run: Run | null): string | undefined {
   if (!run || !run.steps.length) return undefined;
   const live = run.steps.find((s) => s.status === 'running' || s.status === 'repairing');
@@ -43,7 +43,7 @@ export function RunPage() {
       const run = await api.getRun(rid);
       if (rid === currentId.current) dispatch({ type: 'snapshot', run });
     } catch {
-      /* keep live state; next event retries */
+      /* 保留当前实时状态，待后续事件触发时再重试 */
     }
   }, []);
   const refetchSoon = useDebounced(() => void refetch(), 400);
@@ -57,7 +57,7 @@ export function RunPage() {
     [refetchSoon],
   );
 
-  // Initial load: events first (stored), then the snapshot (authoritative, includes their effects).
+  // 初始加载：先拉取历史事件入库，再获取运行快照（权威状态，已包含历史事件的结果）。
   useEffect(() => {
     let cancelled = false;
     dispatch({ type: 'reset' });
@@ -86,7 +86,7 @@ export function RunPage() {
       if (!ev.run_id || ev.run_id === currentId.current) ingest([ev]);
     },
     onOpen: () => {
-      // backfill anything missed while disconnected
+      // 补拉断线期间遗漏的事件
       const rid = currentId.current;
       api
         .runEvents(rid, lastSeq.current || undefined)

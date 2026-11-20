@@ -1,4 +1,4 @@
-// Formatting helpers and zh-CN labels.
+// 格式化辅助函数与简体中文状态标签映射。
 import type { RunStatus, StepStatus, TaskStatus } from '../api';
 
 export const RUN_STATUS_LABEL: Record<RunStatus, string> = {

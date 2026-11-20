@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { diffStats, parseUnifiedDiff } from '../lib/diff';
 
-/** Unified diff viewer with +/- colouring and old/new line numbers. */
+/** 带增删着色与新旧行号展示的 unified diff 查看器。 */
 export function DiffView({ diff, empty = '无差异', maxHeight }: { diff?: string | null; empty?: string; maxHeight?: number }) {
   const lines = useMemo(() => parseUnifiedDiff(diff), [diff]);
   if (!lines.length) return <div className="muted small">{empty}</div>;

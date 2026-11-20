@@ -1,12 +1,11 @@
-"""Zero-token runtime & browser Sentinel (Supervisor L1.5) and output contract checker.
+"""零 Token 运行时与浏览器哨兵（`Supervisor` L1.5 级校验）及输出契约检查器。
 
-Runs deterministically after every step with zero LLM calls:
-- Immediately fails steps that hit hard browser errors (HTTP 4xx/5xx document responses,
-  ``chrome-error://`` network pages) or safety boundaries (CAPTCHA / human-verification gates,
-  which must NEVER be bypassed).
-- Flags suspicious runtime anomalies (unexpected login redirects, background API 401/429/5xx,
-  uncaught JS exceptions, error alert banners, blank pages, stalled DOM) so the Supervisor can
-  adaptively escalate to the L2 visual/semantic judge even when ``l2_policy == "on_change"``.
+在每个步骤结束后确定性运行，不产生任何 LLM 调用：
+- 若命中硬性浏览器错误（文档响应 HTTP 4xx/5xx、``chrome-error://`` 网络错误页）或安全边界
+  （CAPTCHA / 人机验证门禁，严禁绕过），则立即判定该步骤失败。
+- 标记可疑运行时异常（意外跳转登录页、后台接口返回 401/429/5xx、未捕获的 JS 异常、
+  页面错误告警横幅、白屏页面、DOM 无变化停滞），使 `Supervisor` 即便在 ``l2_policy == "on_change"``
+  策略下也能自适应升级调用 L2 视觉语义评审器。
 """
 
 from __future__ import annotations
@@ -61,7 +60,7 @@ def inspect_step(
     tel = obs.get("browser_telemetry") or {}
     warnings: list[str] = []
 
-    # 1. Safety boundary: passive CAPTCHA / anti-bot gate detection -> immediate safe stop.
+    # 1. 安全边界：被动检测 CAPTCHA / 反爬人机验证门禁 -> 立即安全中止。
     if health.get("captcha_detected"):
         return SentinelReport(
             passed=False,
@@ -75,7 +74,7 @@ def inspect_step(
     expects_err = _expects_error(step)
 
     if used_browser:
-        # 2. Hard browser/network error page
+        # 2. 硬性浏览器或网络错误页面
         if health.get("is_error_page") and not expects_err:
             return SentinelReport(
                 passed=False,
@@ -85,7 +84,7 @@ def inspect_step(
                 dom_fingerprint=health.get("dom_fingerprint"),
             )
 
-        # 3. Main-frame HTTP 4xx/5xx error status on navigation
+        # 3. 页面导航时主文档返回 HTTP 4xx/5xx 错误状态码
         doc_status = tel.get("doc_status")
         if isinstance(doc_status, int) and doc_status >= 400 and not expects_err:
             if doc_status >= 500 or doc_status in (401, 403, 404, 429):
@@ -97,7 +96,7 @@ def inspect_step(
                     dom_fingerprint=health.get("dom_fingerprint"),
                 )
 
-        # 4. Suspicious anomalies -> wake up Adaptive L2 Judge
+        # 4. 可疑运行时异常 -> 唤醒自适应 L2 视觉评审器
         if health.get("login_wall_detected") and not _expects_login(step):
             warnings.append("意外跳转到登录页（会话可能已过期）")
 
@@ -161,7 +160,7 @@ def inspect_step(
 
 
 def verify_output_contract(output: dict[str, Any], schema: dict[str, Any] | None) -> tuple[bool, str]:
-    """Validate ``c.output`` against ``flow.output_schema``."""
+    """对照 ``flow.output_schema`` 校验 ``c.output``。"""
     if not schema:
         return True, "no output schema"
     missing: list[str] = []
