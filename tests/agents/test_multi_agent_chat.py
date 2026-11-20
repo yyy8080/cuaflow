@@ -283,7 +283,8 @@ def test_legacy_settings_auto_migrates_old_35_operator_turn_limit(tmp_path: Path
     assert loaded.models.default.api_key == "sk-keep-me"
     assert loaded.coordinator.operator_turn_limit == 120
     assert loaded.coordinator.turn_limit == 24
-    assert loaded.coordinator.max_auto_continues == 2
+    assert loaded.coordinator.max_auto_continues == 4
+    assert loaded.coordinator.supervisor_rescue is True
 
 
 def test_operator_auto_compacts_and_continues_across_segments_without_failing(tmp_path: Path):

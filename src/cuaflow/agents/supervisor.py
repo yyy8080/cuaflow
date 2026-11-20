@@ -430,3 +430,197 @@ class Supervisor:
             store.set_current_version(run["flow_id"], parent)
             self.d.bus.publish("log", {"level": "warning", "text": f"自动回滚 {run['flow_id']} v{cur} -> v{parent}"},
                                run_id=run_id, flow_id=run["flow_id"])
+
+    # ------------------------------------------------------------------ 直连智能体循环的实时巡检与兜底接管
+    def advise_stalled_loop(
+        self,
+        instruction: str,
+        runner: RunnerClient,
+        run_dir: Path,
+        anomaly: dict[str, Any],
+    ) -> str:
+        """当 `ToolAgent` 看门狗检测到连续报错或重复死循环时，先执行零 Token 浏览器自愈再给出监督者纠偏指导。"""
+        s = self.d.settings()
+        guard = RunnerGuard(runner, run_dir)
+        heal_info: dict[str, Any] = {}
+        if s.supervisor.tier0_heal:
+            hres, herr = guard.call(lambda: runner.heal_browser(keep_tabs=s.planner.tab_limit))
+            if not herr and isinstance(hres, dict):
+                heal_info = hres
+
+        obs, _ = guard.call(lambda: runner.observe(detail=False, tag="sup_watchdog"))
+        obs = obs if isinstance(obs, dict) else {}
+        health = obs.get("page_health") if isinstance(obs.get("page_health"), dict) else {}
+
+        if health.get("captcha_detected"):
+            return "页面检测到人机验证（CAPTCHA），严禁继续自动点击或绕过；请立即调用 request_approval 交由人工处理或安全收尾。"
+
+        fallback_advice = (
+            f"检测到异常模式（{anomaly.get('kind')}）：最近调用 `{anomaly.get('last_call', '')[:160]}` 未能取得进展。"
+            f"{f' 已自动执行浏览器清理自愈：{heal_info}。' if heal_info else ''}"
+            "请勿重复完全相同的参数或选择器：建议先调用 `browser_extract(mode='elements')` 或 `observe` 查看最新可用控件，"
+            "优先改用 `browser_interact` / `browser_extract` / `web_fetch` 等内置工具换一种路径推进。"
+        )
+
+        try:
+            from cuaflow.llm.base import image_part, text_part
+
+            sup_llm = self.d.llms.get("supervisor")
+            diag_prompt = (
+                "你是 **Supervisor（运行监督者）**。直连执行子智能体在执行任务过程中出现卡滞或连续报错，请你给出简明扼要的纠偏方案（2~4 条具体可执行建议，不要调用工具）：\n"
+                f"- 任务目标：{instruction}\n"
+                f"- 异常类型：{anomaly.get('kind')}\n"
+                f"- 最近卡住的调用：{anomaly.get('last_call')}\n"
+                f"- 最近一次报错/观测输出：{str(anomaly.get('last_observation') or '')[:800]}\n"
+                f"- 当前浏览器状态：URL={obs.get('url')} | Title={obs.get('title')} | 告警={health.get('alerts')}\n"
+                f"- 已自动执行的零Token环境自愈结果：{heal_info}\n"
+                "请直接输出给执行智能体的中文纠偏指令（指出失败原因以及下一步应改用哪个内置工具或定位策略）。"
+            )
+            parts: list[dict[str, Any]] = [text_part(diag_prompt)]
+            shot_rel = obs.get("screenshot")
+            if shot_rel and getattr(sup_llm, "vision", False):
+                sp = Path(shot_rel) if Path(shot_rel).is_absolute() else (run_dir / shot_rel)
+                if sp.is_file():
+                    parts.append(image_part(sp))
+            resp = sup_llm.chat([{"role": "user", "content": parts}], max_tokens=500)
+            txt = (resp.content or "").strip()
+            if txt:
+                return txt
+        except Exception:  # noqa: BLE001
+            pass
+        return fallback_advice
+
+    def rescue_direct_task(
+        self,
+        instruction: str,
+        runner: RunnerClient,
+        run_dir: Path,
+        cancel: CancelToken,
+        *,
+        prior_memory: str = "",
+        pinned_notes: dict[str, Any] | None = None,
+        fail_reason: str = "",
+        on_log: Callable[[str, str], None] | None = None,
+    ) -> dict[str, Any]:
+        """当主执行子智能体未能自行完成（如触及轮数上限、模型空转或工具异常）时，由监督者接管现场完成兜底收尾。"""
+        import json
+
+        from cuaflow.agents.builtin_tools import build_builtin_tools
+        from cuaflow.agents.loop import Tool, ToolAgent, ToolResult
+        from cuaflow.agents.tools import common_tools, shot_path
+        from cuaflow.llm.base import image_part, text_part, tool_spec
+
+        log = on_log or (lambda k, t: None)
+        s = self.d.settings()
+        guard = RunnerGuard(runner, run_dir)
+        log("observation", f"[监督者兜底接管] 原执行循环未收尾（原因: {fail_reason}），Supervisor 正在检查现场并接管完成剩余步骤…")
+
+        if s.supervisor.tier0_heal:
+            guard.call(lambda: runner.heal_browser(keep_tabs=s.planner.tab_limit))
+
+        obs, _ = guard.call(lambda: runner.observe(detail=True, tag="sup_rescue"))
+        obs = obs if isinstance(obs, dict) else {}
+        health = obs.get("page_health") if isinstance(obs.get("page_health"), dict) else {}
+        if health.get("captcha_detected"):
+            return {
+                "rescued": False,
+                "captcha": True,
+                "summary": "页面存在人机验证（CAPTCHA），监督者已按安全规范停止自动操作。",
+                "output": dict(pinned_notes or {}),
+            }
+
+        fin_before, _ = guard.call(lambda: runner.finish())
+        existing_out = dict((fin_before or {}).get("output") or {})
+        if pinned_notes:
+            existing_out.update(pinned_notes)
+
+        def complete_rescue(args: dict[str, Any]) -> ToolResult:
+            accomplished = bool(args.get("accomplished", True))
+            summary = str(args.get("summary") or "").strip()
+            extra = args.get("output") if isinstance(args.get("output"), dict) else {}
+            if extra:
+                guard.call(lambda: runner.update_output(extra))
+            return ToolResult(
+                "Supervisor rescue completed.",
+                done=True,
+                final={
+                    "rescued": accomplished,
+                    "summary": summary,
+                    "output": {**existing_out, **extra},
+                },
+            )
+
+        shell = self.d.shell_factory()
+        rescue_tools = (
+            build_builtin_tools(runner, run_dir)
+            + common_tools(runner, run_dir, shell)
+            + [
+                Tool(
+                    tool_spec(
+                        "complete_rescue",
+                        "监督者兜底收尾工具：当确认目标已达成、已补齐最后缺失动作，或确认存在不可抗外部阻塞时调用。",
+                        {
+                            "accomplished": {
+                                "type": "boolean",
+                                "description": "任务核心目标（或有价值的阶段性提取）是否已达成",
+                            },
+                            "summary": {"type": "string", "description": "给用户的最终中文结论与进展汇报"},
+                            "output": {"type": "object", "additionalProperties": True},
+                        },
+                        ["accomplished", "summary"],
+                    ),
+                    complete_rescue,
+                )
+            ]
+        )
+
+        rescue_sys = (
+            "你是 **Supervisor（监督者兜底智能体）**。前序执行智能体因步数耗尽或局部卡顿未能调用 finish 收尾，现在由你接管实时浏览器与桌面现场。\n"
+            "工作原则：\n"
+            "1. 先核对当前页面/桌面状态、前序累计记忆与已提取数据：如果用户目标其实已经完成或数据已拿齐，直接调用 `complete_rescue(accomplished=True, summary=..., output=...)` 汇总交付！\n"
+            "2. 如果还差最后几步操作即可完成，优先使用 `browser_interact`、`browser_extract`、`web_fetch`、`file_ops` 快速补齐，然后调用 `complete_rescue(accomplished=True, ...)`。\n"
+            "3. 若确实遇到需要人工登录凭证或目标站点故障等外部阻塞，保留全部已获取数据并调用 `complete_rescue(accomplished=False, summary=...)` 清晰说明原因。"
+        )
+
+        rescue_agent = ToolAgent(
+            self.d.llms.get("fallback"),
+            rescue_sys,
+            rescue_tools,
+            role="supervisor",
+            on_log=log,
+            should_stop=lambda: cancel.cancelled,
+            drain_steering=getattr(cancel, "drain_steering", None),
+            allow_text_finish=True,
+        )
+
+        ctx_lines = [
+            f"# 原始任务目标\n{instruction}",
+            f"# 前序未完成原因\n{fail_reason}",
+            f"# 前序累计工作记忆\n{prior_memory or '(无)'}",
+            f"# 已保存的结构化输出数据\n{json.dumps(existing_out, ensure_ascii=False, indent=2)}",
+            f"# 当前实时页面观测\nURL: {obs.get('url')}\nTitle: {obs.get('title')}\nARIA 摘要:\n{str(obs.get('aria') or '')[:4000]}",
+        ]
+        user_parts: list[dict[str, Any]] = [text_part("\n\n".join(ctx_lines))]
+        for sp in shot_path(run_dir, obs.get("screenshot")):
+            user_parts.append(image_part(sp))
+
+        rres = rescue_agent.run(user_parts, turn_limit=max(12, int(s.supervisor.fallback_turn_limit or 25)))
+        fin_after, _ = guard.call(lambda: runner.finish())
+        merged_out = {**existing_out, **((fin_after or {}).get("output") or {})}
+
+        if rres.done and isinstance(rres.final, dict):
+            # 若 allow_text_finish 直接返回了文本结论，且已有提取产出或明确答复，也视为兜底完成
+            rescued_flag = rres.final.get("rescued", True)
+            summary_txt = str(rres.final.get("summary") or rres.final.get("reply") or "").strip()
+            merged_out.update(rres.final.get("output") or {})
+            return {
+                "rescued": bool(rescued_flag),
+                "summary": summary_txt or prior_memory[:500] or "监督者已完成现场兜底收尾。",
+                "output": merged_out,
+            }
+
+        return {
+            "rescued": bool(merged_out),
+            "summary": prior_memory[:600] or f"监督者已保存现场阶段性结果（原停止原因：{fail_reason}）。",
+            "output": merged_out,
+        }

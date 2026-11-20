@@ -25,6 +25,78 @@ class LLMError(RuntimeError):
     pass
 
 
+class ContextOverflowError(LLMError):
+    """上游大模型返回上下文长度或输入 Token 超限时抛出的可恢复异常。"""
+
+
+_OVERFLOW_PATTERNS = (
+    "context_length_exceeded",
+    "maximum context length",
+    "context window",
+    "prompt is too long",
+    "input length",
+    "range of input length",
+    "too many tokens",
+    "request entity too large",
+    "max_tokens",
+    "token limit",
+    "string too long",
+)
+
+
+def is_context_overflow_error(exc_or_msg: BaseException | str) -> bool:
+    """判断异常文本是否属于上下文窗口或请求体超限错误。"""
+    if isinstance(exc_or_msg, ContextOverflowError):
+        return True
+    low = str(exc_or_msg).lower()
+    if "http 413" in low:
+        return True
+    if ("http 400" in low or "http 422" in low or "invalid_request" in low) and any(p in low for p in _OVERFLOW_PATTERNS):
+        return True
+    return any(p in low for p in ("context_length_exceeded", "maximum context length", "prompt is too long"))
+
+
+def parse_tool_args_resilient(raw: Any) -> dict[str, Any]:
+    """容错解析大模型生成的工具参数，兼容代码块包裹、尾随逗号、单引号字典及转义瑕疵。"""
+    if isinstance(raw, dict):
+        return raw
+    if raw is None:
+        return {}
+    text = str(raw).strip()
+    if not text:
+        return {}
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
+        text = re.sub(r"\n?```\s*$", "", text).strip()
+    for candidate in (text, re.sub(r",\s*([}\]])", r"\1", text)):
+        try:
+            val = json.loads(candidate)
+            if isinstance(val, dict):
+                return val
+        except json.JSONDecodeError:
+            pass
+    # 兼容部分开源/国产模型输出 Python 单引号字典字面量的情况
+    try:
+        import ast
+
+        val = ast.literal_eval(text)
+        if isinstance(val, dict):
+            return json.loads(json.dumps(val, ensure_ascii=False, default=str))
+    except Exception:  # noqa: BLE001
+        pass
+    # 尝试截取最外层 {...}
+    m = re.search(r"\{[\s\S]*\}", text)
+    if m:
+        cleaned = re.sub(r",\s*([}\]])", r"\1", m.group(0))
+        try:
+            val = json.loads(cleaned)
+            if isinstance(val, dict):
+                return val
+        except json.JSONDecodeError:
+            pass
+    return {"__invalid_json__": text[:2000]}
+
+
 @dataclass
 class ToolCall:
     id: str
@@ -49,7 +121,11 @@ class LLMResponse:
                     "type": "function",
                     "function": {
                         "name": tc.name,
-                        "arguments": tc.raw_arguments or json.dumps(tc.arguments, ensure_ascii=False),
+                        "arguments": (
+                            json.dumps(tc.arguments, ensure_ascii=False)
+                            if "__invalid_json__" not in tc.arguments
+                            else "{}"
+                        ),
                     },
                 }
                 for tc in self.tool_calls

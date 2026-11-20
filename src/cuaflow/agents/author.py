@@ -192,9 +192,11 @@ class AuthorSession:
                 except RunnerError:
                     self._write(render_flow_header("exploration"))
                     self.d_runner.load(self.draft, {}, self.run_dir, **self.d.runner_opts)
+                from cuaflow.agents.builtin_tools import build_builtin_tools
+
                 shell = self.d.shell_factory()
                 ask_fn = None if effective_unattended else self.ask_user
-                tools = common_tools(self.d_runner, self.run_dir, shell, ask_user=ask_fn) + [
+                tools = build_builtin_tools(self.d_runner, self.run_dir) + common_tools(self.d_runner, self.run_dir, shell, ask_user=ask_fn) + [
                     Tool(tool_spec("plan_flow", "Declare/revise the flow: metadata, parameters (with example values "
                                                 "from this task), output schema and ordered steps.", PLAN_SCHEMA,
                                    ["name", "params", "steps"]), self.plan_flow),
@@ -228,7 +230,11 @@ class AuthorSession:
                                  f"{base.get('intent_template')!r}, params={base.get('params_schema')}.\n"
                                  f"```python\n{self._source()}\n```\nYou still must call plan_flow and pass every step "
                                  f"with try_step in this session.")
-                res = agent.run("\n\n".join(intro), turn_limit=self._turn_limit or s.author.turn_limit)
+                res = agent.run(
+                    "\n\n".join(intro),
+                    turn_limit=self._turn_limit or s.author.turn_limit,
+                    max_continuations=0 if self._turn_limit is not None else 2,
+                )
                 if self.cancel.cancelled:
                     return tr.status("aborted", error="aborted by user", usage=meter.snapshot())
                 if not res.done:

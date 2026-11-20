@@ -83,7 +83,8 @@ class CoordinatorConfig(BaseModel):
     max_parallel_workers: int = 4
     turn_limit: int = 24
     operator_turn_limit: int = 120
-    max_auto_continues: int = 2
+    max_auto_continues: int = 4
+    supervisor_rescue: bool = True
     auto_report: bool = True
 
 
@@ -108,12 +109,14 @@ def load_settings(path: Path | None = None) -> Settings:
     with _lock:
         if path.is_file():
             raw = json.loads(path.read_text(encoding="utf-8"))
-            # 平滑迁移 v0.2.0 落盘的旧版过低默认步数（35 轮 / 12 轮），避免升级后仍沿用旧上限导致半途中断
+            # 平滑迁移 v0.2.x 落盘的旧版步数与续跑分段配置，确保升级后立即享有 120×5 滚动压缩与监督者兜底保护
             coord = raw.get("coordinator")
-            if isinstance(coord, dict) and "max_auto_continues" not in coord:
-                if coord.get("operator_turn_limit") == 35:
+            if isinstance(coord, dict) and "supervisor_rescue" not in coord:
+                if int(coord.get("operator_turn_limit") or 35) < 120:
                     coord["operator_turn_limit"] = 120
-                if coord.get("turn_limit") == 12:
+                if int(coord.get("max_auto_continues") or 0) < 4:
+                    coord["max_auto_continues"] = 4
+                if int(coord.get("turn_limit") or 12) < 24:
                     coord["turn_limit"] = 24
             return Settings.model_validate(raw)
     return Settings()

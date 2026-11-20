@@ -471,7 +471,9 @@ class MissionSession:
                     else:
                         wrapped_tools.append(t)
 
-                tools = wrapped_tools + [
+                from cuaflow.agents.builtin_tools import build_builtin_tools
+
+                tools = build_builtin_tools(self.runner, self.run_dir) + wrapped_tools + [
                     Tool(
                         tool_spec(
                             "update_plan",

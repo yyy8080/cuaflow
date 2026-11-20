@@ -383,24 +383,37 @@ export function SettingsPage() {
             />
           </div>
           <div className="field">
-            <label>超长任务自动压缩续跑段数（0–10，默认 2 段即最高自动跑 3× 步数）</label>
+            <label>超长任务自动滚动压缩续跑段数（0–20，默认 4 段即最高自动跑 5× 步数）</label>
             <input
               type="number"
               min={0}
-              max={10}
+              max={20}
               step={1}
-              value={s.coordinator?.max_auto_continues ?? 2}
+              value={s.coordinator?.max_auto_continues ?? 4}
               onChange={(e) =>
                 upd((d) => ({
                   ...d,
                   coordinator: {
                     ...d.coordinator,
-                    max_auto_continues: Math.min(10, Math.max(0, parseInt(e.target.value, 10) || 0)),
+                    max_auto_continues: Math.min(20, Math.max(0, parseInt(e.target.value, 10) || 0)),
                   },
                 }))
               }
             />
           </div>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={s.coordinator?.supervisor_rescue ?? true}
+              onChange={(e) =>
+                upd((d) => ({
+                  ...d,
+                  coordinator: { ...d.coordinator, supervisor_rescue: e.target.checked },
+                }))
+              }
+            />
+            启用监督者（Supervisor）实时卡顿纠偏与超限自主兜底接管收尾
+          </label>
           <label className="check">
             <input
               type="checkbox"

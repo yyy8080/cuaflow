@@ -1,4 +1,4 @@
-"""直连执行子智能体 `DirectOperator`：直接操控浏览器、桌面或命令行完成即席任务，无需录制脚本开销。"""
+"""直连执行子智能体 `DirectOperator`：集成内置工具集、双层自动上下文压缩与 `Supervisor` 实时巡检及兜底接管。"""
 
 from __future__ import annotations
 
@@ -6,8 +6,9 @@ import json
 import time
 from typing import Any
 
+from cuaflow.agents.builtin_tools import build_builtin_tools
 from cuaflow.agents.loop import AgentResult, Cancelled, Tool, ToolAgent, ToolResult
-from cuaflow.agents.supervisor import Deps
+from cuaflow.agents.supervisor import Deps, Supervisor
 from cuaflow.agents.tools import RunnerGuard, common_tools, load_prompt, shot_path
 from cuaflow.agents.tracking import CancelToken, RunTracker
 from cuaflow.flow.client import RunnerClient, RunnerError
@@ -17,7 +18,7 @@ from cuaflow.llm.base import tool_spec
 
 
 class DirectOperator:
-    """面向即席探索、并行网页调研与桌面单次操作的直连执行子智能体。"""
+    """面向即席探索、多站点并行调研与桌面操作的生产级直连执行子智能体。"""
 
     def __init__(self, deps: Deps):
         self.d = deps
@@ -35,7 +36,7 @@ class DirectOperator:
         turn_limit: int | None = None,
         runner: RunnerClient | None = None,
     ) -> dict[str, Any]:
-        """在独立运行目录与运行器进程中直接执行子任务，支持多阶段自动压缩续跑、中途转向与超限放行续跑。"""
+        """在独立运行器进程中执行任务：具备内置工具集、自动滚动压缩、看门狗实时纠偏与 Supervisor 兜底接管能力。"""
         cancel = cancel or CancelToken()
         store, s = self.d.store, self.d.settings()
         effective_unattended = s.supervisor.unattended if unattended is None else bool(unattended)
@@ -50,6 +51,7 @@ class DirectOperator:
         owns_runner = runner is None
         rc = runner or self.d.new_runner(run_dir)
         guard = RunnerGuard(rc, run_dir)
+        supervisor = Supervisor(self.d)
         role_name = "desktop" if surface == "desktop" else "explorer"
         captcha_aborted: list[str] = []
 
@@ -74,6 +76,28 @@ class DirectOperator:
                 return f"用户已放行并给出补充指示：{res.get('hint') or '请按最新状态继续'}"
             return f"用户已批准放行（Approved）。{(' 补充说明：' + res['hint']) if res.get('hint') else '请继续执行。'}"
 
+        def handle_captcha_event(payload: dict[str, Any]) -> str:
+            msg = "检测到人机验证（CAPTCHA），触发安全边界保护，严禁自动绕过。"
+            if effective_unattended:
+                captcha_aborted.append(msg)
+                cancel.cancel()
+                raise Cancelled()
+            note = request_approval(
+                "页面出现人机验证（CAPTCHA），子智能体已安全暂停，请在浏览器中人工完成后点击【放行】。",
+                screenshot_rel=payload.get("screenshot"),
+            )
+            return f"CAPTCHA 安全暂停已由人工处理：{note}。请重新观察最新页面后继续。"
+
+        def emit_live_observation(payload: dict[str, Any]) -> None:
+            tr.emit(
+                "worker_observation",
+                {
+                    "screenshot": payload.get("screenshot"),
+                    "url": payload.get("url"),
+                    "title": payload.get("title"),
+                },
+            )
+
         with usage_scope(meter):
             try:
                 try:
@@ -86,7 +110,7 @@ class DirectOperator:
                 ask_fn = (lambda q: request_approval(f"子智能体请求确认: {q}")) if not effective_unattended else None
                 base_tools = common_tools(rc, run_dir, shell, ask_user=ask_fn)
 
-                # 包装 observe 工具：广播实时截图供并行面板展示，并强制执行 CAPTCHA 被动安全拦截
+                # 包装 observe 工具：同步广播实时截图，并执行被动 CAPTCHA 安全拦截
                 wrapped_tools: list[Tool] = []
                 for bt in base_tools:
                     if bt.name == "observe":
@@ -109,19 +133,8 @@ class DirectOperator:
                                 )
                             health = obs.get("page_health") or {}
                             if health.get("captcha_detected"):
-                                msg = "检测到人机验证（CAPTCHA），触发安全边界保护，严禁自动绕过。"
-                                if effective_unattended:
-                                    captcha_aborted.append(msg)
-                                    cancel.cancel()
-                                    raise Cancelled()
-                                note = request_approval(
-                                    "页面出现人机验证（CAPTCHA），子智能体已安全暂停，请在浏览器中人工完成后点击【放行】。",
-                                    screenshot_rel=shot,
-                                )
-                                return ToolResult(
-                                    f"CAPTCHA 安全暂停已由人工处理：{note}。请重新调用 observe 查看最新页面。",
-                                    images=shot_path(run_dir, shot),
-                                )
+                                msg = handle_captcha_event(obs)
+                                return ToolResult(msg, images=shot_path(run_dir, shot))
                             lines: list[str] = []
                             if obs.get("url"):
                                 lines.append(f"Browser URL: {obs['url']}\nTitle: {obs.get('title')}")
@@ -147,7 +160,7 @@ class DirectOperator:
                 def approval_tool(a: dict[str, Any]) -> ToolResult:
                     reason = (a.get("reason") or "请求人工审批放行").strip()
                     if effective_unattended:
-                        return ToolResult("当前处于无人值守模式，无法请求人工放行；若该操作有高风险请安全终止并调用 finish 说明原因。")
+                        return ToolResult("当前处于无人值守模式，无法挂起等待人工放行；若该操作安全可执行请继续，若存在不可逆高风险请调用 finish 汇报原因。")
                     ans = request_approval(reason)
                     return ToolResult(ans)
 
@@ -162,33 +175,52 @@ class DirectOperator:
                         final={"summary": summary, "output": extra_out},
                     )
 
-                tools = wrapped_tools + [
-                    Tool(
-                        tool_spec(
-                            "request_approval",
-                            "在执行高风险/不可逆操作前或按用户要求暂停，向主智能体与用户请求审批放行。",
-                            {"reason": {"type": "string", "description": "需要用户确认或放行的具体事项说明"}},
-                            ["reason"],
+                agent_ref: list[ToolAgent] = []
+
+                builtin_suite = build_builtin_tools(
+                    rc,
+                    run_dir,
+                    on_captcha=handle_captcha_event,
+                    on_observation=emit_live_observation,
+                    on_memory_update=lambda k, v: agent_ref[0].pin_note(k, v) if agent_ref else None,
+                )
+
+                tools = (
+                    builtin_suite
+                    + wrapped_tools
+                    + [
+                        Tool(
+                            tool_spec(
+                                "request_approval",
+                                "在执行高风险/不可逆操作前或按用户要求暂停，向主智能体与用户请求审批放行。",
+                                {"reason": {"type": "string", "description": "需要用户确认或放行的具体事项说明"}},
+                                ["reason"],
+                            ),
+                            approval_tool,
                         ),
-                        approval_tool,
-                    ),
-                    Tool(
-                        tool_spec(
-                            "finish",
-                            "当子任务目标已完成时调用，提交结果摘要与可选的结构化数据字典。",
-                            {
-                                "summary": {"type": "string", "description": "简明中文执行结果汇报"},
-                                "output": {
-                                    "type": "object",
-                                    "description": "提取到的结构化键值对结果（可选）",
-                                    "additionalProperties": True,
+                        Tool(
+                            tool_spec(
+                                "finish",
+                                "当子任务目标已完成时调用，提交结果摘要与可选的结构化数据字典。",
+                                {
+                                    "summary": {"type": "string", "description": "简明中文执行结果汇报"},
+                                    "output": {
+                                        "type": "object",
+                                        "description": "提取到的结构化键值对结果（可选）",
+                                        "additionalProperties": True,
+                                    },
                                 },
-                            },
-                            ["summary"],
+                                ["summary"],
+                            ),
+                            finish_tool,
                         ),
-                        finish_tool,
-                    ),
-                ]
+                    ]
+                )
+
+                def on_watchdog_anomaly(_msgs: list[dict[str, Any]], anomaly: dict[str, Any]) -> str | None:
+                    if not s.coordinator.supervisor_rescue:
+                        return None
+                    return supervisor.advise_stalled_loop(instruction, rc, run_dir, anomaly)
 
                 agent = ToolAgent(
                     self.d.llms.get("operator"),
@@ -198,7 +230,9 @@ class DirectOperator:
                     on_log=lambda k, t: tr.log(role_name, k, t),
                     should_stop=lambda: cancel.cancelled,
                     drain_steering=getattr(cancel, "drain_steering", None),
+                    supervisor_hook=on_watchdog_anomaly,
                 )
+                agent_ref.append(agent)
 
                 intro = [f"# 子任务目标\n{instruction}"]
                 if start_url:
@@ -216,7 +250,12 @@ class DirectOperator:
                     max_continuations=max_cont,
                 )
 
-                # 交互模式下，若多阶段自动续跑后仍触及轮数上限，绝不直接报错丢弃实时页面，而是挂起询问用户继续放行或汇总现有成果
+                if captcha_aborted:
+                    return tr.status("failed", error=captcha_aborted[-1], usage=meter.snapshot())
+                if cancel.cancelled:
+                    return tr.status("aborted", error="aborted by user", usage=meter.snapshot())
+
+                # 第 1 道防线（交互模式）：若跑满当前预算但尚未完成，优先允许用户在对话/面板点击放行继续追加轮数
                 while (
                     not res.done
                     and res.reason == "turn_limit"
@@ -225,22 +264,16 @@ class DirectOperator:
                     and not effective_unattended
                 ):
                     progress = agent.summarize_progress()
-                    tr.log(role_name, "observation", f"[达到阶段步数上限，等待确认续跑] {progress}")
+                    tr.log(role_name, "observation", f"[阶段步数已满，等待确认续跑或转交监督者收尾] {progress}")
                     try:
                         ans = request_approval(
                             f"子智能体已连续执行 {res.turns} 轮操作仍未全部收尾。\n"
                             f"阶段性进展：{progress[:260]}\n"
-                            f"点击【批准放行】将压缩上下文并继续追加 {base_limit} 轮步数；点击【跳过此步】将直接保存并汇报目前已取得的成果。"
+                            f"点击【批准放行】将自动压缩上下文并继续追加 {base_limit} 轮步数；点击【跳过此步】将交由监督者自动汇总并保存现有成果。"
                         )
                     except Cancelled:
                         break
                     if "跳过该动作" in ans:
-                        res = AgentResult(
-                            True,
-                            final={"summary": f"【阶段性成果汇总（共执行 {res.turns} 轮）】\n{progress}", "output": {}},
-                            turns=res.turns,
-                            messages=agent.messages,
-                        )
                         break
                     res = agent.continue_after_limit(
                         base_limit,
@@ -252,6 +285,37 @@ class DirectOperator:
                 if cancel.cancelled:
                     return tr.status("aborted", error="aborted by user", usage=meter.snapshot())
 
+                # 第 2 道防线（监督者兜底接管）：无论无人值守还是模型异常/空转/轮数耗尽，均由 Supervisor 接管现场完成兜底收尾
+                if not res.done and s.coordinator.supervisor_rescue:
+                    rescue = supervisor.rescue_direct_task(
+                        instruction,
+                        rc,
+                        run_dir,
+                        cancel,
+                        prior_memory=agent.working_memory or agent.summarize_progress(),
+                        pinned_notes=agent.pinned_notes,
+                        fail_reason=res.reason,
+                        on_log=lambda k, t: tr.log("supervisor", k, t),
+                    )
+                    if rescue.get("captcha"):
+                        return tr.status("failed", error=rescue["summary"], usage=meter.snapshot())
+                    if rescue.get("rescued"):
+                        res = AgentResult(
+                            True,
+                            final={"summary": rescue["summary"], "output": rescue.get("output") or {}},
+                            turns=res.turns,
+                            messages=agent.messages,
+                            working_memory=agent.working_memory,
+                        )
+                    else:
+                        runner_out_fail: dict[str, Any] = dict(rescue.get("output") or {})
+                        return tr.status(
+                            "failed",
+                            output={**runner_out_fail, "summary": rescue.get("summary") or ""},
+                            error=rescue.get("summary") or f"子智能体与监督者兜底均未能突破阻塞（{res.reason}）",
+                            usage=meter.snapshot(),
+                        )
+
                 runner_out: dict[str, Any] = {}
                 try:
                     fin = rc.finish() or {}
@@ -261,24 +325,18 @@ class DirectOperator:
                     runner_out = {}
 
                 if not res.done:
-                    if res.reason == "turn_limit":
-                        progress = agent.summarize_progress()
-                        return tr.status(
-                            "failed",
-                            output={**runner_out, "partial_summary": progress},
-                            error=f"已达到自动执行轮数上限（累计 {res.turns} 轮）。阶段性进展：{progress[:300]}",
-                            usage=meter.snapshot(),
-                        )
+                    progress = agent.working_memory or agent.summarize_progress()
                     return tr.status(
                         "failed",
-                        output=runner_out or None,
-                        error=f"直连子智能体未能完成：{res.reason}",
+                        output={**runner_out, **agent.pinned_notes, "partial_summary": progress},
+                        error=f"子智能体未能完成目标（{res.reason}）。阶段性进展：{progress[:300]}",
                         usage=meter.snapshot(),
                     )
 
                 final_payload = res.final if isinstance(res.final, dict) else {}
                 merged_output = {
                     **runner_out,
+                    **agent.pinned_notes,
                     **(final_payload.get("output") or {}),
                     "summary": final_payload.get("summary") or "",
                 }

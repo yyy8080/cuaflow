@@ -306,6 +306,7 @@ export type Settings = {
     turn_limit?: number;
     operator_turn_limit?: number;
     max_auto_continues?: number;
+    supervisor_rescue?: boolean;
     auto_report?: boolean;
   };
   supervisor: {

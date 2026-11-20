@@ -137,7 +137,9 @@ class FallbackAgent:
             return ToolResult("Stopping autonomous fallback.", done=True,
                               final={"recovered": False, "reason": args.get("reason", "unrecoverable")})
 
-        tools = common_tools(self.runner, self.run_dir, self.shell) + [
+        from cuaflow.agents.builtin_tools import build_builtin_tools
+
+        tools = build_builtin_tools(self.runner, self.run_dir) + common_tools(self.runner, self.run_dir, self.shell) + [
             Tool(
                 tool_spec(
                     "complete_step",
