@@ -575,6 +575,7 @@ def test_stateful_spa_pagination_loop_and_live_browser_observe(tmp_path: Path, s
             @flow.step("读取当前条目并点击下一页", expect="读取到条目")
             def step_page(c: Ctx):
                 page = c.browser.page()
+                page.set_default_timeout(5000)
                 item = page.locator("#row").inner_text().strip()
                 c.output["item"] = item
                 btn = page.locator("#next-btn")
@@ -601,6 +602,7 @@ def test_stateful_spa_pagination_loop_and_live_browser_observe(tmp_path: Path, s
             if turn["n"] == 1:
                 return {"tool": "python", "args": {"code": f"c.browser.page().goto('{spa_url}')"}}
             if turn["n"] == 2:
+                assert "Error" not in str(messages[-2].get("content", "")), messages[-2]
                 return {
                     "tool": "run_batch",
                     "args": {
@@ -608,6 +610,7 @@ def test_stateful_spa_pagination_loop_and_live_browser_observe(tmp_path: Path, s
                         "max_iterations": 10,
                         "flow_id": flow_holder["id"],
                         "output_state_key": "pages_out",
+                        "on_item_error": "abort",
                     },
                 }
             if turn["n"] == 3:

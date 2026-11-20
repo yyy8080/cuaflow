@@ -126,7 +126,7 @@ def inspect_step(
             warnings.append(f"捕获浏览器弹窗 ({dialogs[0].get('type')}): {dialogs[0].get('message', '')[:100]}")
 
         url = str(health.get("url") or obs.get("url") or "")
-        if doc_status is not None and health.get("body_text_len") == 0 and url and not url.startswith("about:"):
+        if doc_status is not None and health.get("body_text_len") == 0 and url and not url.startswith(("about:", "data:")):
             warnings.append("导航后页面可见正文为空（疑似白屏）")
 
         fp = health.get("dom_fingerprint")

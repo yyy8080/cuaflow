@@ -45,6 +45,8 @@ ENV_BROWSER_EXECUTABLE = "CUAFLOW_BROWSER_EXECUTABLE"
 ENV_NO_SANDBOX = "CUAFLOW_NO_SANDBOX"
 
 DEVTOOLS_ACTIVE_PORT = "DevToolsActivePort"
+STARTUP_BLANK_URL = "data:text/html,"
+_BLANK_URLS = ("", "about:blank", STARTUP_BLANK_URL)
 
 
 class BrowserError(RuntimeError):
@@ -287,7 +289,7 @@ def launch_browser(
     if no_sandbox:
         args.append("--no-sandbox")
     args.extend(extra_args or [])
-    args.append("about:blank")
+    args.append(STARTUP_BLANK_URL)
 
     log_file = Path(log_path) if log_path else udd.parent / "browser.log"
     log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -298,7 +300,9 @@ def launch_browser(
     while time.monotonic() < deadline:
         found = read_devtools_active_port(udd)
         targets = cdp_page_targets(found[0], timeout=1.0) if found else []
-        if found and cdp_version(found[0], timeout=1.0) and any(t.get("url") for t in targets):
+        if found and cdp_version(found[0], timeout=1.0) and any(
+            str(t.get("url") or "") not in ("", "about:blank") for t in targets
+        ):
             port, ws_path = found
             ver = cdp_version(port) or {}
             cdp_url = str(ver.get("webSocketDebuggerUrl") or f"ws://127.0.0.1:{port}{ws_path}")
@@ -493,7 +497,7 @@ class PersistentBrowser:
             ready_deadline = time.monotonic() + 3.0
             while time.monotonic() < ready_deadline:
                 try:
-                    if p0.url and p0.evaluate("document.readyState") == "complete":
+                    if str(p0.url or "") not in ("", "about:blank") and p0.evaluate("document.readyState") == "complete":
                         break
                 except Exception:  # noqa: BLE001
                     pass
@@ -625,20 +629,20 @@ class PersistentBrowser:
             cur_has_real_url = (
                 cur is not None
                 and not cur.is_closed()
-                and str(cur.url or "") not in ("", "about:blank")
+                and str(cur.url or "") not in _BLANK_URLS
             )
             new_url = str(page.url or "")
         except Exception:  # noqa: BLE001
             cur_has_real_url, new_url = False, ""
 
-        if not cur_has_real_url or new_url not in ("", "about:blank"):
+        if not cur_has_real_url or new_url not in _BLANK_URLS:
             self._active = page
             return
 
-        # Delayed startup blank tab or popup still at about:blank: only promote if it navigates to a real URL.
+        # Delayed startup blank tab or popup still at blank URL: only promote if it navigates to a real URL.
         def _promote_on_nav(frame: Any) -> None:
             try:
-                if not page.is_closed() and frame == page.main_frame and str(frame.url or "") not in ("", "about:blank"):
+                if not page.is_closed() and frame == page.main_frame and str(frame.url or "") not in _BLANK_URLS:
                     self._active = page
             except Exception:  # noqa: BLE001
                 pass
@@ -836,9 +840,9 @@ class PersistentBrowser:
             return 0
         active = self.page()
         closed = 0
-        # First close background about:blank tabs, then oldest non-active tabs.
-        candidates = [p for p in pages if p is not active and p.url in ("about:blank", "")] + [
-            p for p in pages if p is not active and p.url not in ("about:blank", "")
+        # First close background blank tabs, then oldest non-active tabs.
+        candidates = [p for p in pages if p is not active and p.url in _BLANK_URLS] + [
+            p for p in pages if p is not active and p.url not in _BLANK_URLS
         ]
         for p in candidates:
             if len(pages) - closed <= max(1, keep_max):
