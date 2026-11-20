@@ -13,6 +13,14 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+for _stream in (sys.stdout, sys.stderr):
+    _reconf = getattr(_stream, "reconfigure", None)
+    if callable(_reconf):
+        try:
+            _reconf(encoding="utf-8", errors="replace")
+        except Exception:  # noqa: BLE001
+            pass
+
 app = typer.Typer(add_completion=False, help="cuaflow — autonomous long-horizon browser + desktop agent with self-healing flows")
 flows_app = typer.Typer(help="Manage the compiled flow library")
 schedules_app = typer.Typer(help="Manage continuous scheduled executions & monitors")
