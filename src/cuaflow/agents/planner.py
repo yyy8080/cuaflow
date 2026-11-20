@@ -384,6 +384,16 @@ class MissionSession:
             # Keep browser clean across long loops (close leaked popup tabs)
             self.guard.call(lambda: self.runner.heal_browser(keep_tabs=s.planner.tab_limit))
 
+            if entry["status"] != "succeeded" and on_item_error == "abort":
+                bstate["last_failed"] = entry
+                self._save_checkpoint()
+                self._reload_scratch()
+                self._mark_phase(phase_id, "failed", f"stopped at item {idx}: {entry.get('error')}")
+                return ToolResult(
+                    f"Batch `{batch_id}` stopped at item {idx}/{len(items)} ({item!r}): {entry.get('error')}. "
+                    f"Completed outputs so far in state[{out_key!r}]."
+                )
+
             results.append(entry)
             bstate["results"] = results
             bstate["completed_count"] = idx + 1
@@ -396,14 +406,6 @@ class MissionSession:
                 "last_status": entry["status"],
             }, step_id=phase_id)
             self._save_checkpoint()
-
-            if entry["status"] != "succeeded" and on_item_error == "abort":
-                self._reload_scratch()
-                self._mark_phase(phase_id, "failed", f"stopped at item {idx}: {entry.get('error')}")
-                return ToolResult(
-                    f"Batch `{batch_id}` stopped at item {idx}/{len(items)} ({item!r}): {entry.get('error')}. "
-                    f"Completed outputs so far in state[{out_key!r}]."
-                )
 
             out_dict = entry.get("output") or {}
             if paginate_mode and entry["status"] == "succeeded" and (

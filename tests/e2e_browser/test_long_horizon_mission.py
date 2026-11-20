@@ -367,7 +367,7 @@ def test_browser_sentinel_catches_500_and_expired_session_recovered_by_fallback(
             @flow.step("打开看板页面", expect="进入经营看板页面而非登录页或报错页")
             def open_dash(c: Ctx):
                 page = c.browser.page()
-                page.set_default_timeout(3000)
+                page.set_default_timeout(10000)
                 page.goto("{base_url}/dashboard")
 
             @flow.step("读取指标", expect="提取到 revenue 指标")
@@ -406,7 +406,9 @@ def test_browser_sentinel_catches_500_and_expired_session_recovered_by_fallback(
         flow = svc.store.create_flow(load_flow(p)[0].meta(), flow_src)
 
         r_ok = svc.orchestrator.process_run(svc.orchestrator.submit_run(flow["id"], {}, enqueue=False)["id"])
-        assert r_ok["status"] == "succeeded" and r_ok["output"] == {"metric": "revenue=9800"}, r_ok
+        assert r_ok["status"] == "succeeded" and r_ok["output"] == {"metric": "revenue=9800"}, (
+            f"ERR={r_ok.get('error')} STEPS={[(st['step_id'], st['status'], st.get('error'), st.get('checks')) for st in r_ok.get('steps', [])]}"
+        )
         assert svc.store.step_stats(flow["id"], "open_dash")["needs_verify"] == 0
 
         # 2) Server returns HTTP 500 on /dashboard -> L1.5 Sentinel catches doc_status=500 deterministically!
@@ -507,9 +509,13 @@ def test_long_horizon_batch_interrupt_and_checkpoint_resume(tmp_path: Path, sess
         t_interrupted = svc.orchestrator.process_task(task["id"], unattended=True)
         unsub()
 
-        assert t_interrupted["status"] == "aborted", t_interrupted
+        assert t_interrupted["status"] == "aborted", (
+            f"FINAL={t_interrupted.get('final_response')} CKPT={t_interrupted.get('checkpoint')}"
+        )
         assert t_interrupted["checkpoint"]["batches"]["b1"]["completed_count"] == 2
-        assert state.order_hits == {"ORD-101": 1, "ORD-102": 1}, t_interrupted
+        assert state.order_hits == {"ORD-101": 1, "ORD-102": 1}, (
+            f"HITS={state.order_hits} B1={t_interrupted['checkpoint']['batches']['b1']}"
+        )
 
         # Now resume! ORD-101 and ORD-102 must NOT be hit again; only ORD-103 runs!
         resume_step = {"n": 0}

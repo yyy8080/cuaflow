@@ -458,24 +458,53 @@ class PersistentBrowser:
                         self.launched = True
                     write_session(self.session_file, info)
                 self.session = info
-            self._browser = self._pw.chromium.connect_over_cdp(
-                str(self.session["cdp_url"]), timeout=int(self.connect_timeout * 1000)
-            )
+            last_cdp_err: Exception | None = None
+            for attempt in range(3):
+                try:
+                    self._browser = self._pw.chromium.connect_over_cdp(
+                        str(self.session["cdp_url"]), timeout=int(self.connect_timeout * 1000)
+                    )
+                    break
+                except Exception as exc:  # noqa: BLE001
+                    last_cdp_err = exc
+                    time.sleep(0.3 * (attempt + 1))
+            if self._browser is None:
+                raise last_cdp_err or BrowserError("connect_over_cdp failed")
         except BaseException:
             self._stop_playwright()
             raise
+        # Wait for Chromium's default persistent context and open page targets BEFORE calling context()
+        # so we never accidentally create a transient incognito context via browser.new_context().
+        port = int((self.session or {}).get("port") or 0)
+        expected_pages = len(cdp_page_targets(port, timeout=0.5)) if port else 0
         if self.launched:
-            sync_deadline = time.monotonic() + 3.0
-            while time.monotonic() < sync_deadline and not self.pages():
-                time.sleep(0.05)
+            expected_pages = max(1, expected_pages)
+        sync_deadline = time.monotonic() + (5.0 if self.launched else 2.0)
+        while time.monotonic() < sync_deadline:
+            ctxs = self._browser.contexts
+            if ctxs and len(ctxs[0].pages) >= expected_pages:
+                break
+            self._pump_playwright(0.05)
         ctx = self.context()
         existing_pages = self.pages()
-        if existing_pages and self._active is None:
-            self._active = existing_pages[-1]
         for existing in existing_pages:
             self._attach_page_monitors(existing)
+        if existing_pages and self._active is None:
+            self.page()
         ctx.on("page", self._on_new_page)
         return self
+
+    def _pump_playwright(self, seconds: float = 0.05) -> None:
+        """Yield to Playwright's asyncio dispatcher fiber so incoming CDP target/context events are processed."""
+        if self._browser is not None and hasattr(self._browser, "_sync"):
+            import asyncio
+
+            try:
+                self._browser._sync(asyncio.sleep(seconds))
+                return
+            except Exception:  # noqa: BLE001
+                pass
+        time.sleep(seconds)
 
     def _adopt_from_profile(self) -> dict[str, Any] | None:
         found = read_devtools_active_port(self.user_data_dir)
@@ -822,7 +851,10 @@ class PersistentBrowser:
         except Exception:  # noqa: BLE001
             pass
         if idle_ms > 0:
-            time.sleep(idle_ms / 1000.0)
+            try:
+                p.wait_for_timeout(idle_ms)
+            except Exception:  # noqa: BLE001
+                time.sleep(idle_ms / 1000.0)
 
     def dismiss_overlays(self, page: Any | None = None) -> list[str]:
         """Safely dismiss common cookie banners or closeable modal overlays (never touches CAPTCHAs)."""
