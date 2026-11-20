@@ -297,7 +297,8 @@ def launch_browser(
     deadline = time.monotonic() + startup_timeout
     while time.monotonic() < deadline:
         found = read_devtools_active_port(udd)
-        if found and cdp_version(found[0], timeout=1.0) and cdp_page_targets(found[0], timeout=1.0):
+        targets = cdp_page_targets(found[0], timeout=1.0) if found else []
+        if found and cdp_version(found[0], timeout=1.0) and any(t.get("url") for t in targets):
             port, ws_path = found
             ver = cdp_version(port) or {}
             cdp_url = str(ver.get("webSocketDebuggerUrl") or f"ws://127.0.0.1:{port}{ws_path}")
@@ -487,6 +488,16 @@ class PersistentBrowser:
             self._pump_playwright(0.05)
         ctx = self.context()
         existing_pages = self.pages()
+        if self.launched and existing_pages:
+            p0 = existing_pages[-1]
+            ready_deadline = time.monotonic() + 3.0
+            while time.monotonic() < ready_deadline:
+                try:
+                    if p0.url and p0.evaluate("document.readyState") == "complete":
+                        break
+                except Exception:  # noqa: BLE001
+                    pass
+                self._pump_playwright(0.05)
         for existing in existing_pages:
             self._attach_page_monitors(existing)
         if existing_pages and self._active is None:

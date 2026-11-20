@@ -376,9 +376,18 @@ class Supervisor:
                 and "browser" in (result.get("surfaces") or [])
             ):
                 tier0_used = True
+                err_text = str(result.get("error") or "")
+                transient_nav = any(
+                    tok in err_text
+                    for tok in (
+                        "ERR_ABORTED",
+                        "Execution context was destroyed",
+                        "Target page, context or browser has been closed",
+                    )
+                )
                 heal, herr = guard.call(lambda: runner.heal_browser(keep_tabs=s.planner.tab_limit))
                 if not herr and isinstance(heal, dict) and (
-                    heal.get("reconnected") or heal.get("tabs_closed") or heal.get("dismissed")
+                    transient_nav or heal.get("reconnected") or heal.get("tabs_closed") or heal.get("dismissed")
                 ):
                     tr.log("supervisor", "observation", f"Tier-0 零Token浏览器自愈尝试: {heal}", step_id=sid)
                     max_loops += 1
