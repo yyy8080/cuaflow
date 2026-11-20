@@ -18,7 +18,7 @@ FLOW = textwrap.dedent('''
     @flow.step("write file", expect="file exists")
     def write(c: Ctx):
         p = c.run_dir / f"{c.params.name}.txt"
-        p.write_text("x" * c.params.n)
+        p.write_text("x" * c.params.n, encoding="utf-8")
         c.state["path"] = str(p)
         print("wrote", p)
 
@@ -36,12 +36,12 @@ FLOW = textwrap.dedent('''
 @pytest.fixture()
 def flow_file(tmp_path: Path) -> Path:
     p = tmp_path / "flow.py"
-    p.write_text(FLOW)
+    p.write_text(FLOW, encoding="utf-8")
     return p
 
 
 def test_patching_roundtrip(flow_file):
-    src = flow_file.read_text()
+    src = flow_file.read_text(encoding="utf-8")
     assert [s.step_id for s in extract_steps(src)] == ["write", "check", "boom"]
     new_check = get_step_source(src, "check").replace('"xxx"', '"xx"')
     assert validate_step_source(new_check, "check") == "check"
@@ -62,7 +62,7 @@ def test_header_and_insert(tmp_path):
                               side_effects=True)
     src = insert_step(head, '@flow.step("s1")\ndef s1(c):\n    c.output["a"] = 1\n')
     p = tmp_path / "f.py"
-    p.write_text(src)
+    p.write_text(src, encoding="utf-8")
     from cuaflow.flow import load_flow
     flow, _ = load_flow(p)
     assert flow.side_effects is True and [s.id for s in flow.steps] == ["s1"]
@@ -79,7 +79,7 @@ def test_runner_patch_retry_and_restart(flow_file, tmp_path):
         r2 = rc.run_step("check")
         assert r2["status"] == "failed" and r2["error_kind"] == "expectation"
         # hot-patch the failing step and retry with live state preserved
-        fixed = get_step_source(flow_file.read_text(), "check").replace('"xxx"', '"xx"')
+        fixed = get_step_source(flow_file.read_text(encoding="utf-8"), "check").replace('"xxx"', '"xx"')
         rc.replace_step(fixed, expected_id="check")
         r3 = rc.run_step("check")
         assert r3["status"] == "passed" and r3["attempt"] == 2
@@ -93,7 +93,7 @@ def test_runner_patch_retry_and_restart(flow_file, tmp_path):
         assert passed == ["write", "check"] and state["path"].endswith("a.txt")
         rc.restart(state=state)
         assert rc.call("get_state")["path"] == state["path"]
-    lines = (run_dir / "steps.jsonl").read_text().splitlines()
+    lines = (run_dir / "steps.jsonl").read_text(encoding="utf-8").splitlines()
     assert len(lines) == 4 and json.loads(lines[1])["status"] == "failed"
 
 

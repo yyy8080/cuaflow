@@ -44,7 +44,7 @@ def test_image_show_marker(env):
 
 def test_image_show_rejects_bad_files(env):
     bad = env / "bad.png"
-    bad.write_text("not an image")
+    bad.write_text("not an image", encoding="utf-8")
     r = runner.invoke(cli_tools.app, ["image-show", "--path", str(bad)])
     assert r.exit_code == 1 and "CUAFLOW_IMAGE" not in r.output
     r = runner.invoke(cli_tools.app, ["image-show", "--path", str(env / "missing.png")])

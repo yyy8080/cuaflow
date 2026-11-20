@@ -54,6 +54,10 @@ class RunnerClient:
         env = {**os.environ, **self.env, "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"}
         src_root = str(Path(__file__).resolve().parents[2])
         env["PYTHONPATH"] = src_root + os.pathsep + env.get("PYTHONPATH", "")
+        # UTF-8 mode: flow code using open()/read_text() without encoding must not depend on the
+        # Windows ANSI code page (cp936/cp1252); also makes the JSON-RPC pipe encoding deterministic.
+        env.setdefault("PYTHONUTF8", "1")
+        env.setdefault("PYTHONIOENCODING", "utf-8")
         kwargs: dict[str, Any] = {}
         if IS_WINDOWS:
             kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]

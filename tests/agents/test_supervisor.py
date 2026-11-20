@@ -16,13 +16,13 @@ FLOW = textwrap.dedent('''
     @flow.step("创建文件", expect="文件已创建")
     def create(c: Ctx):
         p = c.run_dir / "out.txt"
-        p.write_text("")
+        p.write_text("", encoding="utf-8")
         c.state["path"] = str(p)
 
     @flow.step("写入单词", expect="文件包含单词")
     def write_word(c: Ctx):
         # BUG: wrong file name
-        (c.run_dir / "wrong.txt").write_text(c.params.word)
+        (c.run_dir / "wrong.txt").write_text(c.params.word, encoding="utf-8")
         expect.file_contains(c.state["path"], c.params.word, timeout=0.2)
 
     @flow.step("输出结果", expect="输出路径")
@@ -34,7 +34,7 @@ FIXED = textwrap.dedent('''
     @flow.step("写入单词", expect="文件包含单词")
     def write_word(c: Ctx):
         from pathlib import Path
-        Path(c.state["path"]).write_text(c.params.word)
+        Path(c.state["path"]).write_text(c.params.word, encoding="utf-8")
         expect.file_contains(c.state["path"], c.params.word, timeout=1)
 ''')
 
@@ -50,7 +50,7 @@ def make_services(tmp_path, repairer_script, settings: Settings | None = None):
     flow_src = FLOW
     from cuaflow.flow.flow import load_flow
     p = tmp_path / "seed.py"
-    p.write_text(flow_src)
+    p.write_text(flow_src, encoding="utf-8")
     flow_obj, _ = load_flow(p)
     flow = svc.store.create_flow(flow_obj.meta(), flow_src)
     return svc, flow

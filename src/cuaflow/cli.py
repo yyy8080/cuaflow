@@ -93,8 +93,8 @@ def serve(host: str = "127.0.0.1", port: int = 8765, token: Optional[str] = type
         raise typer.BadParameter("refusing to bind to a non-loopback address without --allow-remote")
     tok_file = data_dir() / "token"
     if token is None:
-        token = tok_file.read_text().strip() if tok_file.is_file() else secrets.token_urlsafe(24)
-        tok_file.write_text(token)
+        token = tok_file.read_text(encoding="utf-8").strip() if tok_file.is_file() else secrets.token_urlsafe(24)
+        tok_file.write_text(token, encoding="utf-8")
     svc = _services(start_worker=True)
     console.print(f"[bold green]cuaflow console:[/] http://{host}:{port}/?token={token}")
     console.print(f"data dir: {svc.root}")

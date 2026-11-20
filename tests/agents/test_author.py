@@ -8,7 +8,7 @@ STEP1 = textwrap.dedent('''
     @flow.step("创建笔记文件", expect="文件存在")
     def create_note(c: Ctx):
         p = c.run_dir / f"{c.params.title}.md"
-        p.write_text("")
+        p.write_text("", encoding="utf-8")
         c.state["path"] = str(p)
         expect.file_exists(p, min_size=0)
 ''')

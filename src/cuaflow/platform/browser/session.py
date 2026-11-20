@@ -206,7 +206,7 @@ class _FileLock:
             except FileExistsError:
                 try:
                     age = time.time() - self.path.stat().st_mtime
-                    owner = int(self.path.read_text() or 0)
+                    owner = int(self.path.read_text(encoding="utf-8") or 0)
                 except (OSError, ValueError):
                     age, owner = 0.0, 0
                 if age > self.stale_after or (owner and owner != os.getpid() and not pid_alive(owner)):

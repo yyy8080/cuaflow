@@ -27,7 +27,7 @@ def env(tmp_path):
     svc = Services(root=tmp_path / "lib", llm_override={"default": ok}, runner_opts={"desktop": "fake"},
                    settings_file=tmp_path / "s.json", start_worker=True)
     p = tmp_path / "f.py"
-    p.write_text(FLOW)
+    p.write_text(FLOW, encoding="utf-8")
     flow = svc.store.create_flow(load_flow(p)[0].meta(), FLOW)
     client = TestClient(create_app(svc, TOKEN))
     client.headers["Authorization"] = f"Bearer {TOKEN}"
