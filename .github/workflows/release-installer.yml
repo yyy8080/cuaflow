@@ -1,12 +1,6 @@
 name: build-installer
 on:
   push:
-    tags:
-      - "v*"
-    paths:
-      - "packaging/**"
-      - "src/cuaflow/desktop.py"
-      - ".github/workflows/release-installer.yml"
   workflow_dispatch:
     inputs:
       release_tag:
@@ -24,6 +18,11 @@ permissions:
 
 jobs:
   windows-installer:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.ref, 'refs/tags/v') ||
+      github.ref == 'refs/heads/main' ||
+      github.ref == 'refs/heads/cuaflow-main'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
