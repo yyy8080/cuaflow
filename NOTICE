@@ -1,5 +1,6 @@
-CUAWright includes the Webwright browser runtime (MIT; see LICENSE) and
-the CUAWright OSWorld release runtime imported from commit
-47984a49 of the standalone CUAWright OSWorld release.
-The imported desktop runtime is licensed under Apache-2.0; see
-licenses/OSWorld-runtime-APACHE-2.0.txt.
+CUAFlow is derived from microsoft/CUAWright
+(https://github.com/microsoft/CUAWright), Copyright (c) Microsoft Corporation,
+licensed under the MIT License (see LICENSE).
+
+The OSWorld desktop runtime and the skill-factory extension from the upstream
+project have been removed; no Apache-2.0 licensed code from upstream is included.
