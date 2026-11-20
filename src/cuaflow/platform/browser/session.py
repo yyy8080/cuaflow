@@ -157,6 +157,18 @@ def cdp_version(port: int, timeout: float = 2.0) -> dict[str, Any] | None:
         return None
 
 
+def cdp_page_targets(port: int, timeout: float = 2.0) -> list[dict[str, Any]]:
+    """``GET http://127.0.0.1:<port>/json/list`` filtered to ``type == 'page'`` targets."""
+    try:
+        with _local_opener().open(f"http://127.0.0.1:{int(port)}/json/list", timeout=timeout) as resp:
+            items = json.loads(resp.read().decode("utf-8"))
+            if isinstance(items, list):
+                return [t for t in items if isinstance(t, dict) and t.get("type") == "page"]
+    except (OSError, ValueError, urllib.error.URLError):
+        pass
+    return []
+
+
 def read_devtools_active_port(user_data_dir: str | Path) -> tuple[int, str] | None:
     """Parse ``<profile>/DevToolsActivePort`` → (port, browser ws path)."""
     try:
@@ -285,7 +297,7 @@ def launch_browser(
     deadline = time.monotonic() + startup_timeout
     while time.monotonic() < deadline:
         found = read_devtools_active_port(udd)
-        if found and cdp_version(found[0], timeout=1.0):
+        if found and cdp_version(found[0], timeout=1.0) and cdp_page_targets(found[0], timeout=1.0):
             port, ws_path = found
             ver = cdp_version(port) or {}
             cdp_url = str(ver.get("webSocketDebuggerUrl") or f"ws://127.0.0.1:{port}{ws_path}")
@@ -452,10 +464,17 @@ class PersistentBrowser:
         except BaseException:
             self._stop_playwright()
             raise
+        if self.launched:
+            sync_deadline = time.monotonic() + 3.0
+            while time.monotonic() < sync_deadline and not self.pages():
+                time.sleep(0.05)
         ctx = self.context()
-        ctx.on("page", self._on_new_page)
-        for existing in self.pages():
+        existing_pages = self.pages()
+        if existing_pages and self._active is None:
+            self._active = existing_pages[-1]
+        for existing in existing_pages:
             self._attach_page_monitors(existing)
+        ctx.on("page", self._on_new_page)
         return self
 
     def _adopt_from_profile(self) -> dict[str, Any] | None:
@@ -561,7 +580,33 @@ class PersistentBrowser:
 
     def _on_new_page(self, page: Any) -> None:
         self._attach_page_monitors(page)
-        self._active = page
+        try:
+            cur = self._active
+            cur_has_real_url = (
+                cur is not None
+                and not cur.is_closed()
+                and str(cur.url or "") not in ("", "about:blank")
+            )
+            new_url = str(page.url or "")
+        except Exception:  # noqa: BLE001
+            cur_has_real_url, new_url = False, ""
+
+        if not cur_has_real_url or new_url not in ("", "about:blank"):
+            self._active = page
+            return
+
+        # Delayed startup blank tab or popup still at about:blank: only promote if it navigates to a real URL.
+        def _promote_on_nav(frame: Any) -> None:
+            try:
+                if not page.is_closed() and frame == page.main_frame and str(frame.url or "") not in ("", "about:blank"):
+                    self._active = page
+            except Exception:  # noqa: BLE001
+                pass
+
+        try:
+            page.on("framenavigated", _promote_on_nav)
+        except Exception:  # noqa: BLE001
+            pass
 
     @staticmethod
     def _empty_telemetry() -> dict[str, Any]:
