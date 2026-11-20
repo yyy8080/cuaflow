@@ -278,16 +278,22 @@ def create_app(svc: Services, token: str | None = None) -> FastAPI:
     # ------------------------------------------------------------------ settings
     @app.get("/api/settings", dependencies=A)
     def get_settings() -> dict[str, Any]:
-        return svc.get_settings().model_dump()
+        from cuaflow.config import masked_settings_dict
+
+        return masked_settings_dict(svc.get_settings())
 
     @app.put("/api/settings", dependencies=A)
     def put_settings(body: dict[str, Any]) -> dict[str, Any]:
-        merged = {**svc.get_settings().model_dump(), **body}
+        from cuaflow.config import masked_settings_dict, restore_masked_keys
+
+        current = svc.get_settings()
+        restored = restore_masked_keys(body, current)
+        merged = {**current.model_dump(), **restored}
         try:
             s = Settings.model_validate(merged)
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(422, str(exc)) from None
-        return svc.update_settings(s).model_dump()
+        return masked_settings_dict(svc.update_settings(s))
 
     # ------------------------------------------------------------------ websocket
     @app.websocket("/ws/events")

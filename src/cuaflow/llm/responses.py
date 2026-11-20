@@ -52,7 +52,7 @@ class ResponsesLLM:
                  reasoning_effort: str | None = "medium", request_timeout: float = 300,
                  retry: RetryPolicy | None = None, transport: httpx.BaseTransport | None = None, **_: Any):
         self.model, self.base_url = model, base_url.rstrip("/")
-        self.api_key = api_key if api_key is not None else os.environ.get(api_key_env, "")
+        self.api_key = api_key if api_key is not None and api_key != "" else os.environ.get(api_key_env, "")
         self.vision, self.max_output_tokens, self.reasoning_effort = vision, max_output_tokens, reasoning_effort
         self.retry = retry or RetryPolicy()
         self._client = httpx.Client(timeout=request_timeout, transport=transport)

@@ -52,22 +52,29 @@ class RunnerClient:
     # ------------------------------------------------------------------
     def start(self) -> None:
         env = {**os.environ, **self.env, "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"}
-        src_root = str(Path(__file__).resolve().parents[2])
-        env["PYTHONPATH"] = src_root + os.pathsep + env.get("PYTHONPATH", "")
+        is_frozen_self = bool(getattr(sys, "frozen", False)) and (
+            Path(self.python).resolve() == Path(sys.executable).resolve()
+        )
+        if not is_frozen_self:
+            src_root = str(Path(__file__).resolve().parents[2])
+            env["PYTHONPATH"] = src_root + os.pathsep + env.get("PYTHONPATH", "")
         # UTF-8 mode: flow code using open()/read_text() without encoding must not depend on the
         # Windows ANSI code page (cp936/cp1252); also makes the JSON-RPC pipe encoding deterministic.
         env.setdefault("PYTHONUTF8", "1")
         env.setdefault("PYTHONIOENCODING", "utf-8")
         kwargs: dict[str, Any] = {}
         if IS_WINDOWS:
-            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+            kwargs["creationflags"] = (
+                subprocess.CREATE_NEW_PROCESS_GROUP | getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+            )  # type: ignore[attr-defined]
         else:
             kwargs["start_new_session"] = True
         log = open(self.log_path, "a", encoding="utf-8") if self.log_path else subprocess.DEVNULL  # noqa: SIM115
         if self.log_path:
             self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        cmd = [self.python, "--runner-proc"] if is_frozen_self else [self.python, "-u", "-m", "cuaflow.flow.proc"]
         self.proc = subprocess.Popen(
-            [self.python, "-u", "-m", "cuaflow.flow.proc"],
+            cmd,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log,
             env=env, text=True, encoding="utf-8", errors="replace", bufsize=1, **kwargs)
         self._responses = queue.Queue()

@@ -6,7 +6,7 @@ import json
 import os
 import threading
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -14,9 +14,13 @@ from cuaflow.platform.paths import data_dir
 from cuaflow.platform.shell import DEFAULT_BLOCKED_PATTERNS
 
 
+MASK_PREFIX = "••••••••"
+
+
 class ModelSpec(BaseModel):
     base_url: str = "https://api.openai.com/v1"
     model: str = "gpt-4o"
+    api_key: str = ""
     api_key_env: str = "OPENAI_API_KEY"
     vision: bool = True
     max_output_tokens: int = 4096
@@ -24,6 +28,9 @@ class ModelSpec(BaseModel):
     tool_mode: Literal["native", "json"] = "native"
     temperature: float | None = None
     request_timeout: float = 180
+
+    def resolved_api_key(self) -> str:
+        return self.api_key.strip() or os.environ.get(self.api_key_env, "")
 
 
 class ModelsConfig(BaseModel):
@@ -103,3 +110,48 @@ def save_settings(settings: Settings, path: Path | None = None) -> Settings:
         tmp.write_text(settings.model_dump_json(indent=2), encoding="utf-8")
         tmp.replace(path)
     return settings
+
+
+def _mask_key(key: str) -> str:
+    k = (key or "").strip()
+    if not k:
+        return ""
+    return f"{MASK_PREFIX}{k[-4:]}" if len(k) > 6 else MASK_PREFIX
+
+
+def masked_settings_dict(s: Settings) -> dict[str, Any]:
+    d = s.model_dump()
+    models = d.get("models") or {}
+    if isinstance(models.get("default"), dict):
+        models["default"]["api_key"] = _mask_key(models["default"].get("api_key", ""))
+    for rspec in (models.get("roles") or {}).values():
+        if isinstance(rspec, dict):
+            rspec["api_key"] = _mask_key(rspec.get("api_key", ""))
+    return d
+
+
+def restore_masked_keys(incoming: dict[str, Any], current: Settings) -> dict[str, Any]:
+    out = dict(incoming)
+    in_models = out.get("models")
+    if not isinstance(in_models, dict):
+        return out
+    in_models = dict(in_models)
+    out["models"] = in_models
+    if isinstance(in_models.get("default"), dict):
+        def_d = dict(in_models["default"])
+        if str(def_d.get("api_key") or "").startswith(MASK_PREFIX):
+            def_d["api_key"] = current.models.default.api_key
+        in_models["default"] = def_d
+    if isinstance(in_models.get("roles"), dict):
+        roles_d: dict[str, Any] = {}
+        for role, rspec in in_models["roles"].items():
+            if isinstance(rspec, dict):
+                rcopy = dict(rspec)
+                if str(rcopy.get("api_key") or "").startswith(MASK_PREFIX):
+                    prev = current.models.roles.get(role)
+                    rcopy["api_key"] = prev.api_key if prev else ""
+                roles_d[role] = rcopy
+            else:
+                roles_d[role] = rspec
+        in_models["roles"] = roles_d
+    return out

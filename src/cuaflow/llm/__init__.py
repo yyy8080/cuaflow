@@ -36,7 +36,8 @@ __all__ = [
 
 
 def build_llm(spec: ModelSpec) -> LLM:
-    kwargs = dict(model=spec.model, base_url=spec.base_url, api_key_env=spec.api_key_env, vision=spec.vision,
+    kwargs = dict(model=spec.model, base_url=spec.base_url, api_key=spec.api_key or None,
+                  api_key_env=spec.api_key_env, vision=spec.vision,
                   max_output_tokens=spec.max_output_tokens, request_timeout=spec.request_timeout)
     if spec.api == "responses":
         return ResponsesLLM(**kwargs)

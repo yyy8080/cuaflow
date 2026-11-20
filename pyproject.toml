@@ -39,7 +39,8 @@ test = ["pytest>=8", "pytest-timeout>=2.3"]
 build = ["build>=1", "wheel"]
 
 [project.scripts]
-cuaflow = "cuaflow.cli:app"
+cuaflow = "cuaflow.cli:main"
+cuaflow-desktop = "cuaflow.desktop:main"
 cuaflow-tool = "cuaflow.platform.cli_tools:app"
 
 [tool.setuptools.packages.find]

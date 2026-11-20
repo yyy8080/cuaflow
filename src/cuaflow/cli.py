@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import secrets
 import sys
 import threading
@@ -285,6 +284,7 @@ def run_file(path: Path, param: list[str] = typer.Option(None, "--param", "-p"),
 @config_app.command("model")
 def config_model(model: str, base_url: str = typer.Option(..., help="OpenAI-compatible base URL, e.g. "
                                                                       "https://api.deepseek.com/v1"),
+                 api_key: str = typer.Option("", help="optional direct API key stored locally in settings.json"),
                  api_key_env: str = "OPENAI_API_KEY", role: str = typer.Option("default", help="default|planner|author|"
                                                                                                "supervisor|repairer|fallback|vision_judge|matcher"),
                  vision: bool = True, tool_mode: str = "native", api: str = "chat"):
@@ -292,29 +292,42 @@ def config_model(model: str, base_url: str = typer.Option(..., help="OpenAI-comp
     from cuaflow.config import ModelSpec, load_settings, save_settings
 
     s = load_settings()
-    spec = ModelSpec(model=model, base_url=base_url, api_key_env=api_key_env, vision=vision, tool_mode=tool_mode,
-                     api=api)
+    prev = s.models.default if role == "default" else s.models.roles.get(role)
+    eff_key = api_key if api_key != "" else (prev.api_key if prev else "")
+    spec = ModelSpec(model=model, base_url=base_url, api_key=eff_key, api_key_env=api_key_env, vision=vision,
+                     tool_mode=tool_mode, api=api)
     if role == "default":
         s.models.default = spec
     else:
         s.models.roles[role] = spec
     save_settings(s)
-    console.print(f"{role}: {model} @ {base_url} (key from ${api_key_env})")
+    src_label = "direct key" if eff_key else f"key from ${api_key_env}"
+    console.print(f"{role}: {model} @ {base_url} ({src_label})")
 
 
 @config_app.command("show")
 def config_show():
-    from cuaflow.config import load_settings, settings_path
+    from cuaflow.config import load_settings, masked_settings_dict, settings_path
 
     console.print(f"# {settings_path()}")
-    console.print_json(load_settings().model_dump_json())
+    console.print_json(json.dumps(masked_settings_dict(load_settings()), ensure_ascii=False))
+
+
+@app.command("install-browser")
+def install_browser():
+    """Download standalone Playwright Chromium (optional when system Edge/Chrome is already installed)."""
+    from cuaflow.platform.browser.session import install_playwright_chromium
+
+    code = install_playwright_chromium()
+    raise typer.Exit(code)
 
 
 @app.command()
 def doctor(ping: bool = typer.Option(False, help="send a tiny request to each configured model")):
-    """Check the installation: Python, Playwright browser, Windows automation libs, model keys."""
+    """Check the installation: runtime, browser (Chromium/Edge/Chrome), Windows automation libs, model keys."""
     from cuaflow.config import load_settings
     from cuaflow.platform.base import IS_WINDOWS
+    from cuaflow.platform.browser.session import resolve_browser_executable
 
     ok = True
 
@@ -323,15 +336,13 @@ def doctor(ping: bool = typer.Option(False, help="send a tiny request to each co
         ok &= good
         console.print(f"{'✅' if good else '❌'} {name} {detail}")
 
-    row("python >= 3.11", sys.version_info >= (3, 11), sys.version.split()[0])
+    runtime_label = "frozen standalone" if getattr(sys, "frozen", False) else sys.version.split()[0]
+    row("python >= 3.11", sys.version_info >= (3, 11), runtime_label)
     try:
-        from playwright.sync_api import sync_playwright
-
-        with sync_playwright() as p:
-            exe = p.chromium.executable_path
-        row("playwright chromium", Path(exe).exists(), exe)
+        exe, ch = resolve_browser_executable()
+        row(f"browser ({ch})", Path(exe).exists(), exe)
     except Exception as exc:  # noqa: BLE001
-        row("playwright chromium", False, str(exc))
+        row("browser", False, str(exc))
     if IS_WINDOWS:
         for mod in ("pywinauto", "uiautomation", "pyautogui", "mss"):
             try:
@@ -344,9 +355,9 @@ def doctor(ping: bool = typer.Option(False, help="send a tiny request to each co
     s = load_settings()
     specs = {"default": s.models.default, **s.models.roles}
     for role, spec in specs.items():
-        has_key = bool(os.environ.get(spec.api_key_env)) or "localhost" in spec.base_url or "127.0.0.1" in spec.base_url
-        row(f"model[{role}] {spec.model}", has_key, f"{spec.base_url} key=${spec.api_key_env}"
-                                                    f"{'' if has_key else ' (not set)'}")
+        has_key = bool(spec.resolved_api_key()) or "localhost" in spec.base_url or "127.0.0.1" in spec.base_url
+        key_desc = "configured" if spec.api_key.strip() else f"key=${spec.api_key_env}{'' if has_key else ' (not set)'}"
+        row(f"model[{role}] {spec.model}", has_key, f"{spec.base_url} {key_desc}")
         if ping and has_key:
             from cuaflow.llm import build_llm
 
@@ -358,5 +369,13 @@ def doctor(ping: bool = typer.Option(False, help="send a tiny request to each co
     raise typer.Exit(0 if ok else 1)
 
 
-if __name__ == "__main__":
+def main() -> None:
+    if len(sys.argv) >= 2 and sys.argv[1] == "--runner-proc":
+        from cuaflow.flow.proc import main as runner_main
+
+        raise SystemExit(runner_main())
     app()
+
+
+if __name__ == "__main__":
+    main()

@@ -52,6 +52,11 @@ class Services:
         self._settings = save_settings(s, self.settings_file)
         return self._settings
 
+    def close(self) -> None:
+        self.orchestrator._stop.set()
+        for tok in list(self.orchestrator.tokens.values()):
+            tok.cancel()
+
     def _recover_stale(self) -> list[str]:
         resumable: list[str] = []
         for r in self.store.list_runs(limit=1000):

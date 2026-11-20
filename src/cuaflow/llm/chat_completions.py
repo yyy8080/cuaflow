@@ -40,7 +40,7 @@ class ChatCompletionsLLM:
     ):
         self.model = model
         self.base_url = base_url.rstrip("/")
-        self.api_key = api_key if api_key is not None else os.environ.get(api_key_env, "")
+        self.api_key = api_key if api_key is not None and api_key != "" else os.environ.get(api_key_env, "")
         self.api_key_env = api_key_env
         self.vision = vision
         self.max_output_tokens = max_output_tokens

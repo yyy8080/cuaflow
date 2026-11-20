@@ -111,7 +111,20 @@ def find_channel_executable(channel: str) -> str | None:
     return None
 
 
+def _configure_frozen_browsers_env() -> None:
+    if getattr(sys, "frozen", False) and not os.environ.get("PLAYWRIGHT_BROWSERS_PATH"):
+        meipass = getattr(sys, "_MEIPASS", "")
+        for cand in (
+            Path(meipass) / "ms-playwright" if meipass else None,
+            Path(sys.executable).resolve().parent / "ms-playwright",
+        ):
+            if cand and cand.is_dir():
+                os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(cand)
+                break
+
+
 def _bundled_chromium(pw: Any | None = None) -> str:
+    _configure_frozen_browsers_env()
     if pw is not None:
         path = pw.chromium.executable_path
     else:
@@ -120,8 +133,47 @@ def _bundled_chromium(pw: Any | None = None) -> str:
         with sync_playwright() as p:
             path = p.chromium.executable_path
     if not path or not Path(path).exists():
-        raise BrowserLaunchError("Playwright chromium not found. Run `playwright install chromium`.")
+        raise BrowserLaunchError("Playwright chromium not found. Run `cuaflow install-browser`.")
     return path
+
+
+def resolve_browser_executable(
+    channel: str | None = None,
+    executable: str | None = None,
+    pw: Any | None = None,
+) -> tuple[str, str]:
+    """Locate a usable Chromium/Edge/Chrome binary, falling back to system Edge/Chrome when Chromium isn't installed."""
+    exe_override = executable or os.environ.get(ENV_BROWSER_EXECUTABLE)
+    if exe_override:
+        if not Path(exe_override).exists():
+            raise BrowserLaunchError(f"browser executable {exe_override!r} does not exist")
+        return exe_override, "custom"
+    ch = (channel or os.environ.get(ENV_BROWSER_CHANNEL) or "chromium").lower()
+    if ch not in ("", "auto", "chromium"):
+        exe = find_channel_executable(ch)
+        if exe:
+            return exe, ch
+        raise BrowserLaunchError(f"browser channel {ch!r} not found on this machine")
+    try:
+        return _bundled_chromium(pw), "chromium"
+    except BrowserLaunchError:
+        for fallback_ch in ("msedge", "chrome"):
+            exe = find_channel_executable(fallback_ch)
+            if exe:
+                return exe, fallback_ch
+        raise BrowserLaunchError(
+            "No Chromium, Microsoft Edge, or Google Chrome browser found. "
+            "Install Microsoft Edge / Chrome or run `cuaflow install-browser`."
+        ) from None
+
+
+def install_playwright_chromium() -> int:
+    """Download standalone Playwright Chromium via Playwright's bundled Node driver (works in frozen builds)."""
+    from playwright._impl._driver import compute_driver_executable, get_driver_env
+
+    driver_exe, driver_cli = compute_driver_executable()
+    proc = subprocess.run([str(driver_exe), str(driver_cli), "install", "chromium"], env=get_driver_env())
+    return int(proc.returncode)
 
 
 # ---------------------------------------------------------------------------
@@ -406,14 +458,8 @@ class PersistentBrowser:
         return {**info, "session_file": str(sf), "alive": session_alive(info) if info else False}
 
     def _resolve_executable(self) -> str:
-        if self.executable:
-            return self.executable
-        if self.channel not in ("", "chromium"):
-            exe = find_channel_executable(self.channel)
-            if exe:
-                return exe
-            raise BrowserLaunchError(f"browser channel {self.channel!r} not found on this machine")
-        return _bundled_chromium(self._pw)
+        exe, _ch = resolve_browser_executable(channel=self.channel, executable=self.executable, pw=self._pw)
+        return exe
 
     def _kill_stale(self, info: dict[str, Any] | None) -> None:
         """Kill a leftover browser of a dead session that still holds our profile."""
@@ -428,6 +474,7 @@ class PersistentBrowser:
     def start(self, launch_if_missing: bool = True) -> "PersistentBrowser":
         if self._browser is not None:
             return self
+        _configure_frozen_browsers_env()
         from playwright.sync_api import sync_playwright
 
         try:

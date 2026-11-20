@@ -10,7 +10,7 @@ const L2_LABEL: Record<L2Policy, string> = {
   off: '关闭（off）',
 };
 
-const emptyModel = (): ModelSpec => ({ base_url: '', model: '', api_key_env: '', vision: false });
+const emptyModel = (): ModelSpec => ({ base_url: '', model: '', api_key: '', api_key_env: '', vision: false });
 
 function ModelFields({ value, onChange }: { value: ModelSpec; onChange: (m: ModelSpec) => void }) {
   const set = <K extends keyof ModelSpec>(k: K, v: ModelSpec[K]) => onChange({ ...value, [k]: v });
@@ -25,7 +25,17 @@ function ModelFields({ value, onChange }: { value: ModelSpec; onChange: (m: Mode
         <input type="text" placeholder="gpt-4.1" value={value.model} onChange={(e) => set('model', e.target.value)} />
       </div>
       <div className="field">
-        <label>API Key 环境变量</label>
+        <label>API Key（可直接粘贴，留空则读环境变量）</label>
+        <input
+          type="password"
+          autoComplete="off"
+          placeholder="sk-...（仅保存在本机数据目录）"
+          value={value.api_key ?? ''}
+          onChange={(e) => set('api_key', e.target.value)}
+        />
+      </div>
+      <div className="field">
+        <label>API Key 环境变量（备用）</label>
         <input type="text" placeholder="OPENAI_API_KEY" value={value.api_key_env} onChange={(e) => set('api_key_env', e.target.value)} />
       </div>
       <div className="field">
@@ -115,7 +125,7 @@ export function SettingsPage() {
     <div className="page">
       <div className="page-head">
         <h1>设置</h1>
-        <p className="subtitle">模型、监督策略与安全规则。API Key 不会保存在这里，只填写读取它的环境变量名。</p>
+        <p className="subtitle">模型、监督策略与安全规则。可直接粘贴 API Key（脱敏保存在本机），也可留空从环境变量读取。</p>
       </div>
 
       <Card title="默认模型">

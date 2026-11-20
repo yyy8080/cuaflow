@@ -200,7 +200,14 @@ export type Ticket = {
   resolution?: { action: TicketAction; hint?: string };
 };
 
-export type ModelSpec = { base_url: string; model: string; api_key_env: string; vision?: boolean; max_output_tokens?: number };
+export type ModelSpec = {
+  base_url: string;
+  model: string;
+  api_key?: string;
+  api_key_env: string;
+  vision?: boolean;
+  max_output_tokens?: number;
+};
 export type ModelRole = 'planner' | 'author' | 'supervisor' | 'repairer' | 'fallback' | 'vision_judge';
 export const MODEL_ROLES: ModelRole[] = ['planner', 'author', 'supervisor', 'repairer', 'fallback', 'vision_judge'];
 

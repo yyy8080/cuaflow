@@ -174,7 +174,14 @@ class LocalShell:
                 stderr=f"cuaflow: command blocked by safety policy (pattern: {hit})",
             )
 
+        import sys
+
         full_env = dict(os.environ)
+        if getattr(sys, "frozen", False):
+            exe_dir = str(Path(sys.executable).resolve().parent)
+            cur_path = full_env.get("PATH", "")
+            if exe_dir not in cur_path.split(os.pathsep):
+                full_env["PATH"] = f"{exe_dir}{os.pathsep}{cur_path}" if cur_path else exe_dir
         full_env.update({"PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"})
         full_env.update(self.env)
         if env:

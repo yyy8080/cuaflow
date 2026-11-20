@@ -31,12 +31,29 @@ flowchart TD
 
 ## 安装（Windows 10/11 / Linux）
 
+### 方式一：Windows 安装包直接安装（推荐，免装 Python / Node.js）
+
+1. 前往 [GitHub Releases](https://github.com/yyy8080/cuaflow/releases) 下载 **`cuaflow-setup-0.1.0-win64.exe`**（或绿色免安装版 `cuaflow-portable-0.1.0-win64.zip`）。
+2. 双击运行安装向导（无需管理员权限，自动创建桌面快捷方式并可选加入 `PATH` 与开机自启持续巡检）。
+3. 双击桌面 **cuaflow** 图标，自动启动后台服务并打开 Web 控制台；进入 **「设置」** 页面直接粘贴模型 API Key 保存即可开箱使用（自动调用系统自带 Microsoft Edge / Chrome，无需额外下载浏览器内核；如需独立 Chromium 也可执行 `cuaflow install-browser`）。
+
+### 方式二：本地一键打包生成安装包
+
+```powershell
+# Windows（生成 dist\cuaflow-setup-0.1.0-win64.exe 与便携版 .zip，需本机已装 Python 3.11+、Node.js 与 Inno Setup 6）
+powershell -ExecutionPolicy Bypass -File .\packaging\build_windows.ps1
+# 如需把独立 Chromium 一并打进全离线包，加 -BundleChromium 参数：
+powershell -ExecutionPolicy Bypass -File .\packaging\build_windows.ps1 -BundleChromium
+```
+
+### 方式三：源码开发安装
+
 ```powershell
 # Python 3.11+
 git clone https://github.com/yyy8080/cuaflow; cd cuaflow
 python -m venv .venv; .venv\Scripts\activate
 pip install -e ".[win]"            # Linux 仅浏览器模式：pip install -e .
-playwright install chromium        # 或使用系统 Edge：$env:CUAFLOW_BROWSER_CHANNEL="msedge"
+playwright install chromium        # Windows 下若已有 Edge/Chrome 可省略此步
 cuaflow doctor                     # 检查环境
 ```
 
@@ -44,11 +61,11 @@ cuaflow doctor                     # 检查环境
 
 ## 配置模型（兼容 OpenAI Chat Completions 接口）
 
+可在 Web 控制台 **「设置」** 页直接粘贴 API Key 保存，或通过命令行配置：
+
 ```powershell
-$env:OPENAI_API_KEY="sk-..."
-cuaflow config model gpt-4.1 --base-url https://api.openai.com/v1
-# 支持按角色独立配置模型（大模型做规划/修复，轻量模型做匹配/视觉抽检）：
-# default | planner | author | supervisor | repairer | fallback | vision_judge | matcher
+cuaflow config model gpt-4.1 --base-url https://api.openai.com/v1 --api-key "sk-..."
+# 或从环境变量读取（支持按角色独立配置 default | planner | author | supervisor | repairer | fallback | vision_judge | matcher）：
 cuaflow config model qwen-vl-max --role vision_judge --base-url https://dashscope.aliyuncs.com/compatible-mode/v1 --api-key-env DASHSCOPE_API_KEY
 cuaflow doctor --ping
 ```
