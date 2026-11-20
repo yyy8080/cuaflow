@@ -44,6 +44,18 @@ class Deps:
         rc.start()
         return rc
 
+    def with_runner_opts(self, **overrides: Any) -> "Deps":
+        """派生携带独立 `runner_opts`（如独立浏览器会话路径）的依赖副本，供并行子智能体隔离使用。"""
+        return Deps(
+            store=self.store,
+            bus=self.bus,
+            llms=self.llms,
+            settings=self.settings,
+            tickets=self.tickets,
+            shell_factory=self.shell_factory,
+            runner_opts={**self.runner_opts, **overrides},
+        )
+
 
 class Supervisor:
     def __init__(self, deps: Deps):
@@ -239,6 +251,7 @@ class Supervisor:
                                 shell,
                                 on_log=lambda k, t, _sid=sid: tr.log("fallback", k, t, step_id=_sid),
                                 should_stop=lambda: cancel.cancelled,
+                                drain_steering=getattr(cancel, "drain_steering", None),
                                 turn_limit=s.supervisor.fallback_turn_limit,
                             )
                             fb = fb_agent.recover(working, step, result, checks, intent=intent, repair_history=history)

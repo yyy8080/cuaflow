@@ -7,6 +7,8 @@ export type WsStatus = 'connecting' | 'open' | 'closed';
 export type EventSocketOptions = {
   /** 仅订阅指定运行 ID 的事件；省略则订阅全部事件。 */
   runId?: string;
+  /** 仅订阅指定对话会话 ID 的事件；省略则订阅全部事件。 */
+  sessionId?: string;
   onEvent: (ev: CuaEvent) => void;
   /** 每次连接（或重连）并完成订阅后触发，可用于通过 REST 接口补拉断线期间遗漏的事件。 */
   onOpen?: () => void;
@@ -57,7 +59,9 @@ export class EventSocket {
     this.ws = ws;
     ws.onopen = () => {
       this.retry = 0;
-      const sub = this.opts.runId ? { run_id: this.opts.runId } : {};
+      const sub: Record<string, string> = {};
+      if (this.opts.runId) sub.run_id = this.opts.runId;
+      if (this.opts.sessionId) sub.session_id = this.opts.sessionId;
       ws.send(JSON.stringify({ subscribe: sub }));
       this.opts.onStatus?.('open');
       this.opts.onOpen?.();
@@ -91,7 +95,7 @@ export class EventSocket {
 
 /**
  * 封装 EventSocket 的 React Hook。回调函数通过 ref 读取，因此在重渲染间更新回调不会触发重连；
- * 仅当 `runId` 或 `enabled` 变化时才会重新建立连接。
+ * 仅当 `runId`、`sessionId` 或 `enabled` 变化时才会重新建立连接。
  */
 export function useEventSocket(opts: EventSocketOptions & { enabled?: boolean }): WsStatus {
   const [status, setStatus] = useState<WsStatus>('connecting');
@@ -102,6 +106,7 @@ export function useEventSocket(opts: EventSocketOptions & { enabled?: boolean })
     if (!enabled) return;
     const sock = new EventSocket({
       runId: opts.runId,
+      sessionId: opts.sessionId,
       onEvent: (ev) => ref.current.onEvent(ev),
       onOpen: () => ref.current.onOpen?.(),
       onStatus: (s) => {
@@ -111,6 +116,6 @@ export function useEventSocket(opts: EventSocketOptions & { enabled?: boolean })
     });
     sock.start();
     return () => sock.stop();
-  }, [opts.runId, enabled]);
+  }, [opts.runId, opts.sessionId, enabled]);
   return status;
 }

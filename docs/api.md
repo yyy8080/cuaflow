@@ -137,14 +137,25 @@ type Ticket = {
 | 方法 | 路径 | 请求体 / 参数 | 返回值 |
 |---|---|---|---|
 | GET | `/api/health` | – | `{ok: true, version, platform}`（无需鉴权） |
-| GET | `/api/stats` | – | `GlobalStats`（Token 消耗、脚本节省量、稳定性与定时监控统计） |
+| GET | `/api/stats` | – | `GlobalStats`（Token 消耗、脚本节省量、并发 Worker、稳定性与定时监控统计） |
+| GET | `/api/chats` | 查询参数 `limit?` | `ChatSession[]` |
+| POST | `/api/chats` | `{title?}` | `ChatSession` |
+| GET | `/api/chats/{id}` | – | `ChatSession & {messages: ChatMessage[], workers: Worker[]}` |
+| DELETE | `/api/chats/{id}` | – | `{ok: true}` |
+| POST | `/api/chats/{id}/messages` | `{content, wait?}` | `{session, message, reply?}`（异步唤醒主控智能体响应与并发调度） |
+| GET | `/api/workers` | 查询参数 `session_id?`、`active_only?`、`limit?` | `Worker[]` |
+| POST | `/api/workers/dispatch` | `{session_id?, tasks: [...]}` | `Worker[]`（直接向并行池并发投递多个子智能体） |
+| GET | `/api/workers/{id}` | – | `Worker` |
+| POST | `/api/workers/{id}/steer` | `{instruction}` | `Worker`（向运行中的子智能体实时注入中途动态调整指令） |
+| POST | `/api/workers/{id}/approve` | `{action: "continue"\|"hint"\|"skip"\|"abort", hint?}` | `Worker`（放行或处理子智能体挂起请求） |
+| POST | `/api/workers/{id}/abort` | – | `Worker` |
 | GET | `/api/flows` | – | `Flow[]` |
 | GET | `/api/flows/{id}` | – | `Flow & {versions: Version[]}`（不含 `source` 与 `diff`） |
 | GET | `/api/flows/{id}/versions/{v}` | – | 含 `source` 与 `diff` 的 `Version` |
 | POST | `/api/flows/{id}/run` | `{params, version?, from_step?, resume_checkpoint?, unattended?}` | `Run` |
 | POST | `/api/flows/{id}/rollback` | `{version}` | `Flow` |
 | DELETE | `/api/flows/{id}` | – | `{ok: true}` |
-| POST | `/api/tasks` | `{instruction, start_url?, params?, force_new?, mode?: "auto"\|"mission"\|"single"}` | `Task` |
+| POST | `/api/tasks` | `{instruction, start_url?, params?, force_new?, mode?: "auto"\|"direct"\|"mission"\|"single"}` | `Task` |
 | GET | `/api/tasks` | – | `Task[]`（按最新优先排序） |
 | GET | `/api/tasks/{id}` | – | `Task` |
 | GET | `/api/tasks/{id}/events` | 查询参数 `after_seq?` | `Event[]` |
@@ -168,5 +179,5 @@ type Ticket = {
 ## WebSocket
 
 `/ws/events?token=...` — 服务端按 `seq` 顺序将每条 `Event` 以 JSON 文本帧推送给客户端。
-客户端可发送 `{"subscribe": {"run_id": "..."}}` 或 `{"subscribe": {"task_id": "..."}}` 按条件过滤，
+客户端可发送 `{"subscribe": {"run_id": "..."}}`、`{"subscribe": {"task_id": "..."}}` 或 `{"subscribe": {"session_id": "..."}}` 按条件过滤，
 也可发送 `{"subscribe": {}}` 订阅全部事件。

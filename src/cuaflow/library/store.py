@@ -54,9 +54,26 @@ CREATE TABLE IF NOT EXISTS events (
   seq INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, type TEXT, run_id TEXT, task_id TEXT,
   flow_id TEXT, step_id TEXT, data TEXT
 );
+CREATE TABLE IF NOT EXISTS chat_sessions (
+  id TEXT PRIMARY KEY, title TEXT, status TEXT DEFAULT 'idle', summary TEXT, usage TEXT,
+  created_at TEXT, updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id TEXT PRIMARY KEY, session_id TEXT, role TEXT, sender TEXT, content TEXT, meta TEXT,
+  created_at TEXT
+);
+CREATE TABLE IF NOT EXISTS workers (
+  id TEXT PRIMARY KEY, session_id TEXT, name TEXT, agent_kind TEXT, instruction TEXT,
+  start_url TEXT, params TEXT, flow_id TEXT, run_id TEXT, status TEXT,
+  latest_note TEXT, latest_screenshot TEXT, output TEXT, error TEXT,
+  steering_log TEXT, usage TEXT, started_at TEXT, finished_at TEXT,
+  created_at TEXT, updated_at TEXT
+);
 CREATE INDEX IF NOT EXISTS ix_events_run ON events(run_id, seq);
 CREATE INDEX IF NOT EXISTS ix_events_task ON events(task_id, seq);
 CREATE INDEX IF NOT EXISTS ix_runs_flow ON runs(flow_id, created_at);
+CREATE INDEX IF NOT EXISTS ix_chat_msgs_session ON chat_messages(session_id, created_at);
+CREATE INDEX IF NOT EXISTS ix_workers_session ON workers(session_id, created_at);
 """
 
 _MIGRATIONS: dict[str, list[tuple[str, str]]] = {
@@ -72,7 +89,7 @@ _MIGRATIONS: dict[str, list[tuple[str, str]]] = {
 
 _JSON_COLS = {
     "params_schema", "output_schema", "tags", "steps", "params", "output", "final_verdict", "match",
-    "resolution", "data", "usage", "telemetry", "plan", "checkpoint", "sub_runs",
+    "resolution", "data", "usage", "telemetry", "plan", "checkpoint", "sub_runs", "meta", "steering_log",
 }
 
 
@@ -516,6 +533,20 @@ class Store:
                 script_steps += int(u.get("script_steps") or 0)
                 tokens_saved += int(u.get("estimated_tokens_saved") or 0)
 
+        for row in self._query("SELECT usage FROM chat_sessions WHERE usage IS NOT NULL"):
+            u = row.get("usage")
+            if isinstance(u, dict):
+                total_tokens += int(u.get("total_tokens") or 0)
+                llm_calls += int(u.get("llm_calls") or 0)
+
+        workers_active = (
+            self._one(
+                "SELECT COUNT(*) AS n FROM workers WHERE status IN ('queued', 'running', 'waiting_approval')"
+            )
+            or {}
+        ).get("n") or 0
+        sessions_n = (self._one("SELECT COUNT(*) AS n FROM chat_sessions") or {}).get("n") or 0
+
         denom = total_tokens + tokens_saved
         flow_runs = int(runs_row.get("total") or 0)
         flow_ok = int(runs_row.get("ok") or 0)
@@ -534,6 +565,8 @@ class Store:
             "savings_ratio": round(tokens_saved / denom, 4) if denom > 0 else 0.0,
             "schedules_active": sum(1 for s in sched_rows if s.get("status") == "active" and s.get("enabled")),
             "schedules_tripped": sum(1 for s in sched_rows if s.get("status") == "tripped"),
+            "active_workers": int(workers_active),
+            "chat_sessions": int(sessions_n),
         }
 
     # ------------------------------------------------------------------ 人工工单
@@ -557,6 +590,146 @@ class Store:
             return self._query("SELECT * FROM tickets WHERE status = ? ORDER BY created_at DESC", [status])
         return self._query("SELECT * FROM tickets ORDER BY created_at DESC")
 
+    # ------------------------------------------------------------------ 对话会话与消息
+    def create_chat_session(self, title: str = "新对话") -> dict[str, Any]:
+        """创建新的主智能体对话会话。"""
+        sid = new_id("chat")
+        ts = now_iso()
+        self._exec(
+            "INSERT INTO chat_sessions VALUES (?,?,?,?,?,?,?)",
+            [sid, (title or "新对话").strip(), "idle", None, None, ts, ts],
+        )
+        return self.get_chat_session(sid)  # type: ignore[return-value]
+
+    def get_chat_session(self, session_id: str) -> dict[str, Any] | None:
+        return self._one("SELECT * FROM chat_sessions WHERE id = ?", [session_id])
+
+    def list_chat_sessions(self, limit: int = 100) -> list[dict[str, Any]]:
+        return self._query("SELECT * FROM chat_sessions ORDER BY updated_at DESC LIMIT ?", [limit])
+
+    def update_chat_session(self, session_id: str, **fields: Any) -> dict[str, Any]:
+        fields["updated_at"] = now_iso()
+        self._update("chat_sessions", "id", session_id, fields)
+        return self.get_chat_session(session_id)  # type: ignore[return-value]
+
+    def delete_chat_session(self, session_id: str) -> None:
+        with self._lock:
+            self._db.execute("DELETE FROM chat_messages WHERE session_id = ?", (session_id,))
+            self._db.execute("DELETE FROM chat_sessions WHERE id = ?", (session_id,))
+            self._db.commit()
+
+    def add_chat_message(
+        self,
+        session_id: str,
+        role: str,
+        content: str,
+        *,
+        sender: str | None = None,
+        meta: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """向指定会话追加一条消息，并在首条用户消息到达时自动更新会话标题。"""
+        mid = new_id("msg")
+        ts = now_iso()
+        sender_name = sender or ("user" if role == "user" else "coordinator")
+        with self._lock:
+            self._exec(
+                "INSERT INTO chat_messages VALUES (?,?,?,?,?,?,?)",
+                [mid, session_id, role, sender_name, content, self._j(meta or {}), ts],
+            )
+            sess = self.get_chat_session(session_id)
+            if sess is not None:
+                upd: dict[str, Any] = {}
+                if role == "user" and sess.get("title") in (None, "", "新对话"):
+                    clean = " ".join(content.strip().split())
+                    if clean:
+                        upd["title"] = clean[:32] + ("…" if len(clean) > 32 else "")
+                self.update_chat_session(session_id, **upd)
+        return self._one("SELECT * FROM chat_messages WHERE id = ?", [mid])  # type: ignore[return-value]
+
+    def list_chat_messages(self, session_id: str, limit: int = 500) -> list[dict[str, Any]]:
+        return self._query(
+            "SELECT * FROM chat_messages WHERE session_id = ? ORDER BY rowid ASC LIMIT ?",
+            [session_id, limit],
+        )
+
+    # ------------------------------------------------------------------ 并行子智能体 Worker
+    def create_worker(
+        self,
+        session_id: str | None,
+        name: str,
+        agent_kind: str,
+        instruction: str,
+        *,
+        start_url: str | None = None,
+        params: dict[str, Any] | None = None,
+        flow_id: str | None = None,
+        run_id: str | None = None,
+    ) -> dict[str, Any]:
+        """注册一个由主智能体或并发池派发的子智能体 Worker 记录。"""
+        wid = new_id("wrk")
+        ts = now_iso()
+        self._exec(
+            "INSERT INTO workers VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            [
+                wid,
+                session_id,
+                name,
+                agent_kind,
+                instruction,
+                start_url,
+                self._j(params or {}),
+                flow_id,
+                run_id,
+                "queued",
+                "等待分配执行槽位…",
+                None,
+                None,
+                None,
+                self._j([]),
+                None,
+                None,
+                None,
+                ts,
+                ts,
+            ],
+        )
+        return self.get_worker(wid)  # type: ignore[return-value]
+
+    def get_worker(self, worker_id: str) -> dict[str, Any] | None:
+        return self._one("SELECT * FROM workers WHERE id = ?", [worker_id])
+
+    def list_workers(
+        self,
+        session_id: str | None = None,
+        active_only: bool = False,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        args: list[Any] = []
+        if session_id:
+            clauses.append("session_id = ?")
+            args.append(session_id)
+        if active_only:
+            clauses.append("status IN ('queued', 'running', 'waiting_approval')")
+        where = f"WHERE {' AND '.join(clauses)} " if clauses else ""
+        args.append(limit)
+        return self._query(f"SELECT * FROM workers {where}ORDER BY created_at DESC LIMIT ?", args)
+
+    def update_worker(self, worker_id: str, **fields: Any) -> dict[str, Any]:
+        fields["updated_at"] = now_iso()
+        self._update("workers", "id", worker_id, fields)
+        return self.get_worker(worker_id)  # type: ignore[return-value]
+
+    def append_worker_steering(self, worker_id: str, instruction: str, source: str = "user") -> dict[str, Any]:
+        """向子智能体追加一条中途调整记录并持久化。"""
+        with self._lock:
+            w = self.get_worker(worker_id)
+            if w is None:
+                raise KeyError(worker_id)
+            log = list(w.get("steering_log") or [])
+            log.append({"ts": now_iso(), "source": source, "instruction": instruction})
+            return self.update_worker(worker_id, steering_log=log, latest_note=f"已接收调整指令: {instruction[:80]}")
+
     # ------------------------------------------------------------------ 事件日志
     def add_event(self, ev: dict[str, Any]) -> dict[str, Any]:
         cur = self._exec("INSERT INTO events (ts, type, run_id, task_id, flow_id, step_id, data) "
@@ -572,3 +745,4 @@ class Store:
     def list_task_events(self, task_id: str, after_seq: int = 0, limit: int = 5000) -> list[dict[str, Any]]:
         return self._query("SELECT * FROM events WHERE task_id = ? AND seq > ? ORDER BY seq LIMIT ?",
                            [task_id, after_seq, limit])
+

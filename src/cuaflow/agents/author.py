@@ -206,8 +206,15 @@ class AuthorSession:
                     Tool(tool_spec("finish", "Finish when all planned steps passed and the task is accomplished.",
                                    {"final_response": {"type": "string"}}), self.finish),
                 ]
-                agent = ToolAgent(self.d.llms.get("author"), load_prompt("author"), tools, role="author",
-                                  on_log=lambda k, t: tr.log("author", k, t), should_stop=lambda: self.cancel.cancelled)
+                agent = ToolAgent(
+                    self.d.llms.get("author"),
+                    load_prompt("author"),
+                    tools,
+                    role="author",
+                    on_log=lambda k, t: tr.log("author", k, t),
+                    should_stop=lambda: self.cancel.cancelled,
+                    drain_steering=getattr(self.cancel, "drain_steering", None),
+                )
                 intro = [f"# Task\n{self.task['instruction']}"]
                 if self.task.get("start_url"):
                     intro.append(f"Start URL: {self.task['start_url']}")

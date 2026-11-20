@@ -22,6 +22,30 @@ class CancelToken:
         return self._ev.is_set()
 
 
+class WorkerControl(CancelToken):
+    """支持运行中途动态注入调整指令（Steering）的子智能体控制句柄。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._steer_lock = threading.Lock()
+        self._steer_queue: list[str] = []
+
+    def push_steering(self, instruction: str) -> None:
+        text = (instruction or "").strip()
+        if not text:
+            return
+        with self._steer_lock:
+            self._steer_queue.append(text)
+
+    def drain_steering(self) -> list[str]:
+        with self._steer_lock:
+            if not self._steer_queue:
+                return []
+            items = list(self._steer_queue)
+            self._steer_queue.clear()
+            return items
+
+
 class TicketBroker:
     """人机协同工单代理。``wait`` 会阻塞工作线程，直至控制台处理并结单。"""
 

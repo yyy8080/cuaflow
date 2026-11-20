@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { NavLink, Route, Routes } from 'react-router-dom';
 import { api, getToken, onUnauthorized } from './api';
 import { useAsync } from './lib/hooks';
+import { ChatStudioPage } from './pages/ChatStudioPage';
 import { TasksPage } from './pages/TasksPage';
 import { FlowsPage } from './pages/FlowsPage';
 import { FlowDetailPage } from './pages/FlowDetailPage';
@@ -21,14 +22,10 @@ function Unauthorized() {
         <h2>需要访问令牌</h2>
         <p>{hasToken ? '当前保存的访问令牌无效或已过期。' : '尚未提供访问令牌。'}</p>
         <p>
-          请在运行 <code>cuaflow serve</code> 的终端中找到形如
-          <br />
-          <code>http://127.0.0.1:8765/?token=…</code>
-          <br />
-          的地址，并用浏览器打开它。令牌会保存在本机浏览器中。
+          请直接从桌面快捷方式启动 <code>cuaflow</code>，或打开服务端输出的完整鉴权地址（含 <code>?token=…</code> 查询参数）。令牌会自动保存在本机中。
         </p>
         <button className="btn btn-primary" onClick={() => window.location.reload()}>
-          我已打开新地址，重新加载
+          重新加载工作台
         </button>
       </div>
     </div>
@@ -46,6 +43,12 @@ function TicketBadge() {
   return n > 0 ? <span className="nav-count">{n}</span> : null;
 }
 
+function ActiveWorkerBadge() {
+  const { data } = useAsync(() => api.listWorkers({ active_only: true }), [], 4000);
+  const n = data?.length ?? 0;
+  return n > 0 ? <span className="nav-count nav-count-info">{n}</span> : null;
+}
+
 const THEME_KEY = 'cuaflow_theme';
 
 function ThemeToggle() {
@@ -55,7 +58,7 @@ function ThemeToggle() {
     localStorage.setItem(THEME_KEY, theme);
   }, [theme]);
   return (
-    <button className="theme-toggle" title="切换主题" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+    <button className="theme-toggle" title="切换深浅色主题" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
       {theme === 'dark' ? '🌙' : '☀️'}
     </button>
   );
@@ -71,11 +74,18 @@ export function App() {
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-logo">🌊</span>
-          <span className="brand-name">cuaflow</span>
+          <div>
+            <div className="brand-name">cuaflow</div>
+            <div className="brand-sub">多智能体工作台</div>
+          </div>
         </div>
         <nav>
           <NavLink to="/" end>
-            <span className="nav-ico">✨</span>长任务
+            <span className="nav-ico">💬</span>对话工作台
+            <ActiveWorkerBadge />
+          </NavLink>
+          <NavLink to="/tasks">
+            <span className="nav-ico">📋</span>批量长任务
           </NavLink>
           <NavLink to="/flows">
             <span className="nav-ico">📚</span>脚本库
@@ -87,7 +97,7 @@ export function App() {
             <span className="nav-ico">▶️</span>执行记录
           </NavLink>
           <NavLink to="/tickets">
-            <span className="nav-ico">🙋</span>人工介入
+            <span className="nav-ico">🙋</span>审批工单
             <TicketBadge />
           </NavLink>
           <NavLink to="/settings">
@@ -100,7 +110,8 @@ export function App() {
       </aside>
       <main className="main">
         <Routes>
-          <Route path="/" element={<TasksPage />} />
+          <Route path="/" element={<ChatStudioPage />} />
+          <Route path="/tasks" element={<TasksPage />} />
           <Route path="/flows" element={<FlowsPage />} />
           <Route path="/flows/:id" element={<FlowDetailPage />} />
           <Route path="/schedules" element={<SchedulesPage />} />

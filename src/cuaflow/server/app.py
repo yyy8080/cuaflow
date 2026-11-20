@@ -67,6 +67,29 @@ class ResolveRequest(BaseModel):
     hint: str | None = None
 
 
+class ChatCreateRequest(BaseModel):
+    title: str = "新对话"
+
+
+class ChatMessageRequest(BaseModel):
+    content: str
+    wait: bool = False
+
+
+class WorkerDispatchRequest(BaseModel):
+    session_id: str | None = None
+    tasks: list[dict[str, Any]]
+
+
+class WorkerSteerRequest(BaseModel):
+    instruction: str
+
+
+class WorkerApproveRequest(BaseModel):
+    action: str = "continue"
+    hint: str | None = None
+
+
 def create_app(svc: Services, token: str | None = None) -> FastAPI:
     token = token or secrets.token_urlsafe(24)
     app = FastAPI(title="cuaflow", version=__version__)
@@ -94,6 +117,76 @@ def create_app(svc: Services, token: str | None = None) -> FastAPI:
     @app.get("/api/stats", dependencies=A)
     def stats() -> dict[str, Any]:
         return store.global_stats()
+
+    # ------------------------------------------------------------------ 主智能体对话与并行子智能体池
+    @app.get("/api/chats", dependencies=A)
+    def list_chats(limit: int = Query(100, le=500)) -> list[dict[str, Any]]:
+        return store.list_chat_sessions(limit)
+
+    @app.post("/api/chats", dependencies=A)
+    def create_chat(req: ChatCreateRequest) -> dict[str, Any]:
+        return store.create_chat_session(req.title)
+
+    @app.get("/api/chats/{session_id}", dependencies=A)
+    def get_chat(session_id: str) -> dict[str, Any]:
+        sess = need(store.get_chat_session(session_id), "chat session")
+        return {
+            **sess,
+            "messages": store.list_chat_messages(session_id),
+            "workers": store.list_workers(session_id=session_id),
+        }
+
+    @app.delete("/api/chats/{session_id}", dependencies=A)
+    def delete_chat(session_id: str) -> dict[str, Any]:
+        need(store.get_chat_session(session_id), "chat session")
+        for w in store.list_workers(session_id=session_id, active_only=True):
+            svc.pool.abort(w["id"])
+        store.delete_chat_session(session_id)
+        return {"ok": True}
+
+    @app.post("/api/chats/{session_id}/messages", dependencies=A)
+    def post_chat_message(session_id: str, req: ChatMessageRequest) -> dict[str, Any]:
+        need(store.get_chat_session(session_id), "chat session")
+        if not req.content.strip():
+            raise HTTPException(400, "message content is empty")
+        return svc.coordinator.send_user_message(session_id, req.content, wait=req.wait)
+
+    @app.get("/api/workers", dependencies=A)
+    def list_workers(
+        session_id: str | None = None,
+        active_only: bool = False,
+        limit: int = Query(100, le=500),
+    ) -> list[dict[str, Any]]:
+        return store.list_workers(session_id=session_id, active_only=active_only, limit=limit)
+
+    @app.post("/api/workers/dispatch", dependencies=A)
+    def dispatch_workers(req: WorkerDispatchRequest) -> list[dict[str, Any]]:
+        if not req.tasks:
+            raise HTTPException(400, "tasks list is empty")
+        return svc.pool.dispatch(req.session_id, req.tasks)
+
+    @app.get("/api/workers/{worker_id}", dependencies=A)
+    def get_worker(worker_id: str) -> dict[str, Any]:
+        return need(store.get_worker(worker_id), "worker")
+
+    @app.post("/api/workers/{worker_id}/steer", dependencies=A)
+    def steer_worker(worker_id: str, req: WorkerSteerRequest) -> dict[str, Any]:
+        need(store.get_worker(worker_id), "worker")
+        if not req.instruction.strip():
+            raise HTTPException(400, "instruction is empty")
+        return svc.pool.steer(worker_id, req.instruction.strip(), source="user")
+
+    @app.post("/api/workers/{worker_id}/approve", dependencies=A)
+    def approve_worker(worker_id: str, req: WorkerApproveRequest) -> dict[str, Any]:
+        need(store.get_worker(worker_id), "worker")
+        if req.action not in ("continue", "hint", "skip", "abort"):
+            raise HTTPException(400, f"invalid action {req.action!r}")
+        return svc.pool.approve(worker_id, action=req.action, hint=req.hint)
+
+    @app.post("/api/workers/{worker_id}/abort", dependencies=A)
+    def abort_worker(worker_id: str) -> dict[str, Any]:
+        need(store.get_worker(worker_id), "worker")
+        return svc.pool.abort(worker_id)
 
     # ------------------------------------------------------------------ 工作流管理
     @app.get("/api/flows", dependencies=A)
@@ -139,7 +232,7 @@ def create_app(svc: Services, token: str | None = None) -> FastAPI:
     def create_task(req: TaskRequest) -> dict[str, Any]:
         if not req.instruction.strip():
             raise HTTPException(400, "instruction is empty")
-        if req.mode not in ("auto", "mission", "single"):
+        if req.mode not in ("auto", "mission", "single", "direct"):
             raise HTTPException(400, f"invalid mode {req.mode!r}")
         return orch.submit_task(req.instruction, req.start_url, req.params, req.force_new, mode=req.mode)
 
@@ -313,6 +406,11 @@ def create_app(svc: Services, token: str | None = None) -> FastAPI:
             task_id = filt.get("task_id")
             if task_id and ev.get("task_id") != task_id:
                 return
+            session_id = filt.get("session_id")
+            if session_id:
+                ev_sid = ev.get("session_id") or (ev.get("data") or {}).get("session_id")
+                if ev_sid != session_id:
+                    return
             try:
                 loop.call_soon_threadsafe(q.put_nowait, ev)
             except (RuntimeError, asyncio.QueueFull):

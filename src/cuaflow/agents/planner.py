@@ -605,6 +605,7 @@ class MissionSession:
                     role="planner",
                     on_log=lambda k, t: self.tr.log("planner", k, t),
                     should_stop=lambda: self.cancel.cancelled,
+                    drain_steering=getattr(self.cancel, "drain_steering", None),
                 )
                 res = agent.run("\n\n".join(intro), turn_limit=s.planner.turn_limit)
                 self._save_checkpoint()

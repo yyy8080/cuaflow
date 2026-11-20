@@ -154,6 +154,62 @@ export function SettingsPage() {
         </div>
       </Card>
 
+      <Card title="主智能体与多智能体并行池">
+        <div className="form-grid">
+          <div className="field">
+            <label>最大并行子智能体数量（独立浏览器槽位上限）</label>
+            <input
+              type="number"
+              min={2}
+              max={12}
+              step={1}
+              value={s.coordinator?.max_parallel_workers ?? 4}
+              onChange={(e) =>
+                upd((d) => ({
+                  ...d,
+                  coordinator: {
+                    ...d.coordinator,
+                    max_parallel_workers: Math.min(12, Math.max(2, parseInt(e.target.value, 10) || 4)),
+                  },
+                }))
+              }
+            />
+          </div>
+          <div className="field">
+            <label>直连子智能体单次步数上限</label>
+            <input
+              type="number"
+              min={5}
+              max={120}
+              step={5}
+              value={s.coordinator?.operator_turn_limit ?? 35}
+              onChange={(e) =>
+                upd((d) => ({
+                  ...d,
+                  coordinator: {
+                    ...d.coordinator,
+                    operator_turn_limit: Math.min(120, Math.max(5, parseInt(e.target.value, 10) || 35)),
+                  },
+                }))
+              }
+            />
+          </div>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={s.coordinator?.auto_report ?? true}
+              onChange={(e) =>
+                upd((d) => ({
+                  ...d,
+                  coordinator: { ...d.coordinator, auto_report: e.target.checked },
+                }))
+              }
+            />
+            并行子智能体全部完成后自动由主智能体汇总汇报到对话流
+          </label>
+        </div>
+      </Card>
+
       <Card title="监督者与自主自愈策略">
         <div className="form-grid">
           <div className="field">

@@ -130,10 +130,15 @@ jobs:
             $Tag = "${{ github.ref_name }}"
           }
           $NoteLines = @(
-            "## cuaflow $Tag — Windows 独立桌面安装包",
+            "## cuaflow $Tag — 多智能体对话式工作台 Windows 独立桌面安装包",
+            "",
+            "### 核心亮点",
+            "- **对话式主控智能体 + 多子智能体真并行**：自然语言与主智能体对话，按需并发调度浏览器直连（独立槽位互不冲突）、桌面直连、脚本监督、脚本录制与长程规划子智能体。",
+            "- **运行中途动态调整与一键放行**：子智能体后台并发执行期间对话不阻塞，支持随时注入中途调整指令（Steering）或对关键步骤一键放行。",
+            "- **单窗口一体化桌面 WebUI**：双击直接打开独立桌面应用窗口，无需额外启动独立控制器或浏览器标签页。",
             "",
             "### 下载说明",
-            "- **cuaflow-setup-*-win64.exe（推荐）**：Windows 10/11 标准向导安装包，免装 Python 与 Node.js，自动识别调用系统自带 Microsoft Edge / Chrome，安装后自动创建桌面快捷方式，打开控制台在「设置」页直接粘贴 API Key 即可开箱使用。",
+            "- **cuaflow-setup-*-win64.exe（推荐）**：Windows 10/11 标准向导安装包，免装 Python 与 Node.js，自动识别调用系统 Microsoft Edge / Chrome，安装后在「设置」页粘贴 API Key 即可开箱使用。",
             "- **cuaflow-portable-*-win64.zip**：绿色免安装便携版，解压后双击 cuaflow-desktop.exe 即可启动。",
             "- **SHA256SUMS.txt**：安装包 SHA-256 校验值。"
           )

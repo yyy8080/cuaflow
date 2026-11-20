@@ -3,4 +3,4 @@
 衍生自 microsoft/CUAWright（MIT 许可证）。
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

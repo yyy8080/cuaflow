@@ -21,9 +21,11 @@ from cuaflow.llm.base import (
 from cuaflow.llm.chat_completions import ChatCompletionsLLM
 from cuaflow.llm.responses import ResponsesLLM
 
-ROLES = ("planner", "author", "supervisor", "repairer", "fallback", "vision_judge", "matcher")
+ROLES = ("coordinator", "operator", "planner", "author", "supervisor", "repairer", "fallback", "vision_judge", "matcher")
 
 _ROLE_FALLBACKS: dict[str, tuple[str, ...]] = {
+    "coordinator": ("planner", "author", "default"),
+    "operator": ("author", "default"),
     "planner": ("author", "default"),
     "fallback": ("author", "repairer", "default"),
 }

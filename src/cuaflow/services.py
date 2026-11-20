@@ -10,13 +10,15 @@ from pathlib import Path
 from typing import Any
 
 from cuaflow.agents.author import Author
+from cuaflow.agents.coordinator import CoordinatorAgent, SubagentPool
+from cuaflow.agents.operator import DirectOperator
 from cuaflow.agents.planner import MissionPlanner
 from cuaflow.agents.supervisor import Deps, Supervisor
 from cuaflow.agents.tracking import CancelToken, TicketBroker
 from cuaflow.config import Settings, load_settings, save_settings, settings_path
 from cuaflow.library.events import EventBus
 from cuaflow.library.match import looks_long_horizon, match_task
-from cuaflow.library.store import Store
+from cuaflow.library.store import Store, now_iso
 from cuaflow.llm import LLM, LLMProvider, UsageMeter, usage_scope
 from cuaflow.platform.paths import data_dir
 from cuaflow.platform.shell import LocalShell
@@ -38,9 +40,12 @@ class Services:
                          runner_opts=dict(runner_opts or {}))
         self.supervisor = Supervisor(self.deps)
         self.author = Author(self.deps)
+        self.operator = DirectOperator(self.deps)
         self.planner = MissionPlanner(self.deps, self.supervisor, self.author)
         resumable = self._recover_stale()
         self.orchestrator = Orchestrator(self, start_worker=start_worker)
+        self.pool = SubagentPool(self, start_workers=start_worker)
+        self.coordinator = CoordinatorAgent(self)
         if start_worker and self._settings.planner.auto_resume:
             for tid in resumable:
                 self.orchestrator.resume_task(tid)
@@ -56,6 +61,7 @@ class Services:
         self.orchestrator._stop.set()
         for tok in list(self.orchestrator.tokens.values()):
             tok.cancel()
+        self.pool.close()
 
     def _recover_stale(self) -> list[str]:
         resumable: list[str] = []
@@ -68,6 +74,17 @@ class Services:
                     resumable.append(t["id"])
                 self.store.update_task(t["id"], status="failed",
                                        final_response="interrupted (server restarted; resumable from checkpoint)")
+        for w in self.store.list_workers(active_only=True, limit=500):
+            self.store.update_worker(
+                w["id"],
+                status="failed",
+                error="interrupted (server restarted)",
+                latest_note="服务重启已中断",
+                finished_at=now_iso(),
+            )
+        for cs in self.store.list_chat_sessions(limit=200):
+            if cs.get("status") == "thinking":
+                self.store.update_chat_session(cs["id"], status="idle")
         for t in self.store.list_tickets("open"):
             self.store.resolve_ticket(t["id"], "abort", "server restarted")
         return resumable
@@ -319,7 +336,29 @@ class Orchestrator:
                                                       unattended=unattended)
                     return self._finish_task(task_id, run, set_status)
 
-            # 3. 显式指定 mission 模式时，直接交由 MissionPlanner 执行
+            # 3. 显式指定 direct 模式时，直接交由 DirectOperator 执行（不录制生成脚本）
+            if task.get("mode") == "direct":
+                drun = store.create_run("direct", task.get("params") or {}, task_id=task_id, steps=[])
+                store.append_task_run(task_id, drun["id"])
+                self.tokens[drun["id"]] = cancel
+                set_status("running", run_id=drun["id"])
+                dres = self.svc.operator.execute(
+                    drun["id"],
+                    task["instruction"],
+                    cancel,
+                    surface="browser",
+                    start_url=task.get("start_url"),
+                    params=task.get("params") or {},
+                    unattended=unattended,
+                )
+                out = dres.get("output") if isinstance(dres.get("output"), dict) else {}
+                summary = out.get("summary") or json.dumps(out, ensure_ascii=False)
+                if dres.get("status") == "succeeded":
+                    return set_status("succeeded", final_response=summary or "直连执行已完成")
+                return set_status("aborted" if dres.get("status") == "aborted" else "failed",
+                                  final_response=dres.get("error") or "direct run failed")
+
+            # 4. 显式指定 mission 模式时，直接交由 MissionPlanner 执行
             if task.get("mode") == "mission":
                 m = {"verdict": "mission", "flow_id": None, "params": task.get("params") or {},
                      "reason": "explicit mission mode"}

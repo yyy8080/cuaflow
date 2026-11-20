@@ -18,8 +18,9 @@ const VERDICT_TONE: Record<string, 'success' | 'info' | 'warning'> = {
 
 const MODE_LABEL: Record<TaskMode, string> = {
   auto: '智能路由（复用脚本 / 长任务自动规划）',
+  direct: '直连即时执行（直接操作浏览器与桌面，不录制脚本）',
   mission: '长任务自主规划（拆解阶段 + 批量编译省 Token）',
-  single: '单流程脚本模式（一任务一脚本）',
+  single: '单流程脚本模式（边执行边录制脚本）',
 };
 
 export function TasksPage() {

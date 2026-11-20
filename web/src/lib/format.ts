@@ -53,14 +53,35 @@ export const AUTHOR_LABEL: Record<string, string> = {
 };
 
 export const ROLE_LABEL: Record<string, string> = {
-  planner: '规划者',
-  author: '录制者',
+  coordinator: '主控智能体',
+  operator: '直连执行器',
+  explorer: '浏览器探索',
+  desktop: '桌面直连',
+  planner: '批量规划者',
+  author: '脚本录制者',
   supervisor: '监督者',
   repairer: '修复者',
   fallback: '自主接管',
   vision_judge: '视觉裁判',
   system: '系统',
   agent: '智能体',
+};
+
+export const AGENT_KIND_META: Record<string, { label: string; icon: string; desc: string }> = {
+  explorer: { label: '浏览器直连', icon: '🌐', desc: '独立浏览器实例直接探索执行，不录制脚本' },
+  desktop: { label: '桌面直连', icon: '🖥️', desc: '直接操控操作系统原生应用与命令行' },
+  supervisor: { label: '脚本监督', icon: '🛡️', desc: '低 Token 复用已存脚本，L0–L3 监督自愈' },
+  author: { label: '脚本录制', icon: '🎬', desc: '边执行边编译为可重复复用的参数化脚本' },
+  planner: { label: '批量规划', icon: '🧭', desc: '长程多阶段拆解与大批量循环处理' },
+};
+
+export const WORKER_STATUS_LABEL: Record<string, string> = {
+  queued: '排队中',
+  running: '并行执行中',
+  waiting_approval: '等待放行',
+  succeeded: '已完成',
+  failed: '失败',
+  aborted: '已终止',
 };
 
 export type Tone = 'neutral' | 'info' | 'success' | 'danger' | 'warning' | 'muted';
@@ -81,9 +102,11 @@ export function statusTone(s: string | undefined): Tone {
     case 'matching':
     case 'planning':
     case 'authoring':
+    case 'thinking':
       return 'info';
     case 'repairing':
     case 'waiting_human':
+    case 'waiting_approval':
     case 'open':
       return 'warning';
     case 'aborted':

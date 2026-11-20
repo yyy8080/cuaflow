@@ -1,4 +1,8 @@
-"""面向已安装 cuaflow 发行版的独立桌面启动器（启动本地服务、打开浏览器并展示桌面控制窗口）。"""
+"""面向已安装 cuaflow 发行版的单窗口桌面端启动器。
+
+启动后在进程内静默拉起本地后端服务，并直接以独立桌面窗口形式打开内置多智能体对话式 WebUI
+（优先使用原生 pywebview WebView2 窗口，自动回退至独立无边框 Edge/Chrome App 壳窗口，不再额外弹出独立的控制器小窗或浏览器标签页）。
+"""
 
 from __future__ import annotations
 
@@ -64,118 +68,75 @@ def _ensure_std_streams(root: Path) -> Path:
     return log_path
 
 
-def _open_folder(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-    if sys.platform == "win32":
-        os.startfile(str(path))  # type: ignore[attr-defined]
-    elif sys.platform == "darwin":
-        subprocess.Popen(["open", str(path)])
-    else:
-        subprocess.Popen(["xdg-open", str(path)])
+def _find_app_shell_browser() -> str | None:
+    """查找可用于承载独立无地址栏 App 窗口的系统 Edge 或 Chrome 可执行文件。"""
+    from cuaflow.platform.browser.session import find_channel_executable
+
+    for ch in ("msedge", "chrome", "chromium"):
+        exe = find_channel_executable(ch)
+        if exe:
+            return exe
+    return None
 
 
-def _run_tk_window(console_url: str, display_addr: str, data_root: Path, browser_desc: str, stop_fn) -> bool:
-    try:
-        import tkinter as tk
-    except Exception:  # noqa: BLE001
-        return False
+def _open_standalone_webui(console_url: str, data_root: Path, *, wait: bool = True) -> str:
+    """以单一独立桌面应用窗口打开内置 WebUI，返回实际采用的外壳模式名称。
 
-    try:
-        win = tk.Tk()
-    except Exception:  # noqa: BLE001
-        return False
+    优先级：
+    1. `pywebview` 原生系统 WebView2 桌面窗口（阻塞至窗口关闭）。
+    2. 系统 Edge / Chrome 的 `--app=...` 独立应用窗口模式（使用专属 `webui_shell` 配置目录，无浏览器标签栏与地址栏）。
+    3. 兜底调用系统默认浏览器。
+    """
+    if wait:
+        try:
+            import webview  # type: ignore[import-not-found]
 
-    win.title("cuaflow 桌面控制器")
-    win.geometry("430x255")
-    win.resizable(False, False)
-    win.configure(bg="#0f172a")
+            webview.create_window(
+                "cuaflow — 多智能体对话工作台",
+                console_url,
+                width=1420,
+                height=900,
+                min_size=(980, 640),
+            )
+            webview.start()
+            return "pywebview"
+        except Exception:  # noqa: BLE001
+            pass
 
-    meipass = getattr(sys, "_MEIPASS", "")
-    ico_candidates = [
-        Path(sys.executable).resolve().parent / "cuaflow.ico",
-        *(
-            [Path(meipass) / "cuaflow.ico"]
-            if meipass
-            else []
-        ),
-        Path(__file__).resolve().parents[2] / "packaging" / "cuaflow.ico",
-    ]
-    for ico in ico_candidates:
-        if ico.is_file() and sys.platform == "win32":
-            try:
-                win.iconbitmap(default=str(ico))
-            except Exception:  # noqa: BLE001
-                pass
-            break
+    exe = _find_app_shell_browser()
+    if exe:
+        shell_profile = (data_root / "webui_shell").resolve()
+        shell_profile.mkdir(parents=True, exist_ok=True)
+        cmd = [
+            exe,
+            f"--app={console_url}",
+            f"--user-data-dir={shell_profile}",
+            "--window-size=1420,900",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-features=TranslateUI",
+        ]
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=creationflags,
+            )
+            if not wait:
+                return "app_window_detached"
+            started = time.monotonic()
+            proc.wait()
+            # 若进程在 2 秒内正常驻留后由用户关闭窗口，则视为桌面主窗口已退出
+            if time.monotonic() - started >= 2.0:
+                return "app_window_closed"
+            return "app_window_delegated"
+        except OSError:
+            pass
 
-    header = tk.Frame(win, bg="#0f172a", padx=20, pady=16)
-    header.pack(fill="x")
-    tk.Label(
-        header,
-        text="cuaflow 智能浏览器与桌面代理",
-        fg="#f8fafc",
-        bg="#0f172a",
-        font=("Microsoft YaHei UI", 13, "bold"),
-        anchor="w",
-    ).pack(fill="x")
-    tk.Label(
-        header,
-        text=f"● 服务运行中：{display_addr}  |  浏览器内核：{browser_desc}",
-        fg="#4ade80",
-        bg="#0f172a",
-        font=("Microsoft YaHei UI", 9),
-        anchor="w",
-         pady=4,
-    ).pack(fill="x")
-    tk.Label(
-        header,
-        text="关闭浏览器网页不会中断后台长任务与定时巡检；点击下方「停止并退出」可彻底关闭。",
-        fg="#94a3b8",
-        bg="#0f172a",
-        font=("Microsoft YaHei UI", 8),
-        wraplength=390,
-        justify="left",
-        anchor="w",
-    ).pack(fill="x")
-
-    status_var = tk.StringVar(value="")
-    btns = tk.Frame(win, bg="#0f172a", padx=20, pady=6)
-    btns.pack(fill="x")
-
-    def open_console() -> None:
-        webbrowser.open(console_url)
-        status_var.set("已在默认浏览器打开控制台")
-
-    def copy_url() -> None:
-        win.clipboard_clear()
-        win.clipboard_append(console_url)
-        status_var.set("控制台完整链接已复制到剪贴板")
-
-    def open_dir() -> None:
-        _open_folder(data_root)
-
-    def quit_app() -> None:
-        status_var.set("正在安全停止后台服务...")
-        win.update_idletasks()
-        stop_fn()
-        win.destroy()
-
-    btn_style = {"font": ("Microsoft YaHei UI", 9, "bold"), "bd": 0, "padx": 12, "pady": 8, "cursor": "hand2"}
-    tk.Button(btns, text="打开 Web 控制台", bg="#2563eb", fg="#ffffff", activebackground="#1d4ed8",
-              activeforeground="#ffffff", command=open_console, **btn_style).pack(side="left", padx=(0, 8))
-    tk.Button(btns, text="复制链接", bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
-              activeforeground="#ffffff", command=copy_url, **btn_style).pack(side="left", padx=(0, 8))
-    tk.Button(btns, text="数据目录", bg="#1e293b", fg="#e2e8f0", activebackground="#334155",
-              activeforeground="#ffffff", command=open_dir, **btn_style).pack(side="left", padx=(0, 8))
-    tk.Button(btns, text="停止并退出", bg="#dc2626", fg="#ffffff", activebackground="#b91c1c",
-              activeforeground="#ffffff", command=quit_app, **btn_style).pack(side="right")
-
-    tk.Label(win, textvariable=status_var, fg="#38bdf8", bg="#0f172a",
-             font=("Microsoft YaHei UI", 8), padx=20, anchor="w").pack(fill="x", pady=(6, 0))
-
-    win.protocol("WM_DELETE_WINDOW", quit_app)
-    win.mainloop()
-    return True
+    webbrowser.open(console_url)
+    return "browser_fallback"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -185,12 +146,12 @@ def main(argv: list[str] | None = None) -> int:
 
         return int(runner_main())
 
-    parser = argparse.ArgumentParser(prog="cuaflow-desktop", description="cuaflow desktop launcher & server")
+    parser = argparse.ArgumentParser(prog="cuaflow-desktop", description="cuaflow 独立单窗口 WebUI 桌面端")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--token", default=os.environ.get("CUAFLOW_TOKEN") or None)
-    parser.add_argument("--no-browser", action="store_true", help="do not open web browser automatically")
-    parser.add_argument("--no-gui", action="store_true", help="run server in background without controller window")
+    parser.add_argument("--no-browser", action="store_true", help="不自动打开界面窗口")
+    parser.add_argument("--no-gui", action="store_true", help="仅作为后台无界面守护服务运行")
     args = parser.parse_args(raw_args)
 
     from cuaflow.platform.paths import data_dir
@@ -205,7 +166,7 @@ def main(argv: list[str] | None = None) -> int:
         token = tok_file.read_text(encoding="utf-8").strip() if tok_file.is_file() else secrets.token_urlsafe(24)
         tok_file.write_text(token, encoding="utf-8")
 
-    # 若本地已有正在运行的 cuaflow 实例，则直接复用
+    # 若本地已有正在运行的 cuaflow 实例，则直接复用已有服务唤醒界面，不再重复启动第二个后端
     existing_port = args.port
     if info_file.is_file():
         try:
@@ -218,23 +179,19 @@ def main(argv: list[str] | None = None) -> int:
         if _cuaflow_alive(args.host, probe_port):
             url = f"http://{args.host}:{probe_port}/?token={token}"
             if not args.no_browser:
-                webbrowser.open(url)
+                if args.no_gui:
+                    webbrowser.open(url)
+                else:
+                    _open_standalone_webui(url, root, wait=False)
             return 0
 
     port = _pick_port(args.host, args.port)
     console_url = f"http://{args.host}:{port}/?token={token}"
-    display_addr = f"http://{args.host}:{port}"
 
     import uvicorn
 
-    from cuaflow.platform.browser.session import resolve_browser_executable
     from cuaflow.server import create_app
     from cuaflow.services import Services
-
-    try:
-        _bexe, browser_desc = resolve_browser_executable()
-    except Exception:  # noqa: BLE001
-        browser_desc = "未检测到浏览器"
 
     svc = Services(start_worker=True)
     app = create_app(svc, token)
@@ -264,14 +221,16 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:  # noqa: BLE001
             pass
 
-    if not args.no_browser:
-        webbrowser.open(console_url)
-
     try:
-        if not args.no_gui and _run_tk_window(console_url, display_addr, root, browser_desc, stop_server):
-            stop_server()
-            srv_thread.join(timeout=5.0)
-            return 0
+        # 标准桌面模式：直接打开单一独立 WebUI 窗口，关闭窗口时自动安全停止内置服务
+        if not args.no_gui and not args.no_browser:
+            mode = _open_standalone_webui(console_url, root, wait=True)
+            if mode in ("pywebview", "app_window_closed"):
+                stop_server()
+                srv_thread.join(timeout=5.0)
+                return 0
+        elif not args.no_browser:
+            webbrowser.open(console_url)
 
         def _sig_handler(*_: Any) -> None:
             stop_server()

@@ -79,12 +79,20 @@ class PlannerConfig(BaseModel):
     auto_resume: bool = False
 
 
+class CoordinatorConfig(BaseModel):
+    max_parallel_workers: int = 4
+    turn_limit: int = 12
+    operator_turn_limit: int = 35
+    auto_report: bool = True
+
+
 class Settings(BaseModel):
     models: ModelsConfig = Field(default_factory=ModelsConfig)
     supervisor: SupervisorConfig = Field(default_factory=SupervisorConfig)
     safety: SafetyConfig = Field(default_factory=SafetyConfig)
     author: AuthorConfig = Field(default_factory=AuthorConfig)
     planner: PlannerConfig = Field(default_factory=PlannerConfig)
+    coordinator: CoordinatorConfig = Field(default_factory=CoordinatorConfig)
 
 
 _lock = threading.Lock()

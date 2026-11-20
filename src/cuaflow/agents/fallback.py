@@ -39,6 +39,7 @@ class FallbackAgent:
         shell: ShellBackend,
         on_log: Callable[[str, str], None] | None = None,
         should_stop: Callable[[], bool] | None = None,
+        drain_steering: Callable[[], list[str]] | None = None,
         turn_limit: int = 25,
     ):
         self.llm = llm
@@ -48,6 +49,7 @@ class FallbackAgent:
         self.shell = shell
         self.on_log = on_log or (lambda k, t: None)
         self.should_stop = should_stop
+        self.drain_steering = drain_steering
         self.turn_limit = turn_limit
 
     def recover(
@@ -165,7 +167,7 @@ class FallbackAgent:
         ]
 
         agent = ToolAgent(self.llm, load_prompt("fallback"), tools, role="fallback",
-                          on_log=self.on_log, should_stop=self.should_stop)
+                          on_log=self.on_log, should_stop=self.should_stop, drain_steering=self.drain_steering)
         prompt_sections = [
             f"# Overall Task Intent\n{intent or '(not specified)'}",
             f"# Blocked Step: `{step_id}` — {step.get('title')}\nExpected outcome: {step.get('expect') or '-'}",

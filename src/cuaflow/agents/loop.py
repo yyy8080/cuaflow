@@ -67,6 +67,8 @@ class ToolAgent:
         keep_images: int = 3,
         compact_chars: int = 240_000,
         should_stop: Callable[[], bool] | None = None,
+        drain_steering: Callable[[], list[str]] | None = None,
+        allow_text_finish: bool = False,
     ):
         self.llm = llm
         self.system_prompt = system_prompt
@@ -76,18 +78,50 @@ class ToolAgent:
         self.keep_images = keep_images
         self.compact_chars = compact_chars
         self.should_stop = should_stop or (lambda: False)
+        self.drain_steering = drain_steering
+        self.allow_text_finish = allow_text_finish
         self.messages: list[dict[str, Any]] = []
 
+    def _inject_steering(self) -> bool:
+        """抽取并注入来自主智能体或用户的中途动态调整指令。"""
+        if self.drain_steering is None:
+            return False
+        notes = self.drain_steering()
+        if not notes:
+            return False
+        for note in notes:
+            self.on_log("observation", f"[收到中途调整指令] {note}")
+            self.messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "【主控智能体/用户中途动态调整指令（最高优先级，请立即按此新要求调整后续执行方案）】\n"
+                        f"{note}"
+                    ),
+                }
+            )
+        return True
+
     # ------------------------------------------------------------------
-    def run(self, user_content: str | list[dict[str, Any]], turn_limit: int = 40) -> AgentResult:
-        self.messages = [{"role": "system", "content": self.system_prompt},
-                         {"role": "user", "content": user_content}]
+    def run(
+        self,
+        user_content: str | list[dict[str, Any]],
+        turn_limit: int = 40,
+        prior_messages: list[dict[str, Any]] | None = None,
+    ) -> AgentResult:
+        if prior_messages is not None:
+            self.messages = [{"role": "system", "content": self.system_prompt}, *prior_messages,
+                             {"role": "user", "content": user_content}]
+        else:
+            self.messages = [{"role": "system", "content": self.system_prompt},
+                             {"role": "user", "content": user_content}]
         self._first_user = self.messages[1]
         idle = 0
         for turn in range(1, turn_limit + 1):
             if self.should_stop():
                 return AgentResult(False, reason="cancelled", turns=turn - 1, messages=self.messages)
-            if turn_limit - turn == 2:
+            self._inject_steering()
+            if turn_limit - turn == 2 and not self.allow_text_finish:
                 self.messages.append({"role": "user", "content": "[budget] Only 3 turns remain. Finish now if "
                                                                  "possible, or report what blocks you."})
             try:
@@ -100,6 +134,8 @@ class ToolAgent:
             if resp.content.strip():
                 self.on_log("thought", resp.content.strip())
             if not resp.tool_calls:
+                if self.allow_text_finish and resp.content.strip():
+                    return AgentResult(True, final={"reply": resp.content.strip()}, turns=turn, messages=self.messages)
                 idle += 1
                 if idle >= 3:
                     return AgentResult(False, reason="no_tool_calls", turns=turn, messages=self.messages)
@@ -140,7 +176,8 @@ class ToolAgent:
                         parts.append(image_part(p))
                 if len(parts) > 1:
                     self.messages.append({"role": "user", "content": parts})
-            if finished is not None:
+            # 若在最后一步执行期间刚好收到主控新的中途调整指令，则暂缓结束并继续按新指令调整
+            if finished is not None and not self._inject_steering():
                 return AgentResult(True, final=finished.final, turns=turn, messages=self.messages)
             self._maybe_compact()
         return AgentResult(False, reason="turn_limit", turns=turn_limit, messages=self.messages)

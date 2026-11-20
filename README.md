@@ -1,46 +1,44 @@
 # cuaflow
 
-**cuaflow** 是一个**面向长周期任务的自主电脑与浏览器操作智能体**，支持浏览器与 Windows 桌面操作。项目 fork 自 [microsoft/CUAWright](https://github.com/microsoft/CUAWright)（MIT）并全面重构。
+**cuaflow** 是一个**对话式多智能体并行协同的浏览器与 Windows 桌面操作工作台**。项目 fork 自 [microsoft/CUAWright](https://github.com/microsoft/CUAWright)（MIT）并深度重构。
 
 ### 核心设计理念
-1. **AI 全流程自主规划执行长任务**：`MissionPlanner` 自动将复杂长任务（跨多阶段、多页翻页、数十上百条数据处理）拆解为动态执行计划（`explore` / `skill` / `batch` / `synthesize`），共享常驻浏览器登录态，持久化每一步与每一项检查点，支持**中断断点续跑（`resume`）**。
-2. **录制脚本是为了省 Token**：
-   - 跨任务直接复用已沉淀的参数化 `Flow` 脚本（**0 探索 Token**）；
-   - **单次长任务内即时编译省 Token（`run_batch`）**：处理 N 条列表/分页任务时，AI 仅在第 1 条上操作并自动编译成参数化 `Flow`，第 2..N 条直接交给脚本高速执行；
-   - 默认不重复回放刚录制完的任务（`verify_replay=False`），全链路统计真实 Token 消耗与脚本节省的 Token 数（`/api/stats`、`cuaflow stats`）。
-3. **五层监督者 + 四级自愈保障脚本持续稳定不出错**：
-   - **L0–L3 监督体系**（含 **L1.5 零 Token 浏览器运行时哨兵**：实时捕获主文档 HTTP 4xx/5xx、网络错误页、未捕获 JS 异常、登录失效重定向、弹窗遮挡、白屏与 DOM 卡死；平时 0 Token，仅在发现异常或定期抽检时**自适应唤醒 L2 视觉裁判**）。
-   - **四级自愈恢复**：Tier 0 零 Token 浏览器自愈（清理弹窗/多余标签页/CDP 重连）→ Tier 1 `Repairer` 原地热修补单步代码并沉淀新版本 → Tier 2 `FallbackAgent` **AI 自主接管现场**（处理登录过期等跨步绕路后交回脚本继续执行）→ Tier 3 无人值守安全终止或人工工单。
-4. **持续巡检与熔断保护（Schedules）**：支持将任意脚本或长任务设为定时持续监控任务，内置连续失败熔断器（Circuit Breaker），目标站点宕机时自动熔断防止空耗 Token。
+1. **主智能体对话调度 + 多子智能体真并行执行（`CoordinatorAgent` + `SubagentPool`）**：
+   - 用户主要通过自然语言与**主控智能体**对话；主智能体按需将任务拆解并同时派发给多个专业子智能体并发执行：
+     - `explorer`（**默认浏览器直连**）：分配独立隔离的浏览器会话槽位（`BrowserSlotPool`），多智能体真并行操作各自网页，互不抢占标签页，**无录制脚本额外开销**；
+     - `desktop`（**原生桌面直连**）：直接操控 Windows UIA 桌面控件与命令行，自动串行互斥物理鼠标键盘；
+     - `supervisor`（**低 Token 脚本监督**）：高速回放脚本库已有 `Flow`，配备 L0–L3 监督与四级自愈；
+     - `author`（**按需脚本录制**）：仅在明确需要沉淀可重复脚本时启动“边做边编译”；
+     - `planner`（**长程批量规划**）：面向跨阶段、大批量循环与断点续跑使命。
+   - **中途动态调整与一键放行**：子智能体后台并发运行期间对话输入框永不阻塞，用户可随时发消息实时注入**中途调整指令（Steering）**，或对关键敏感步骤进行**一键放行 / 指导 / 跳过 / 终止**。
+2. **单窗口一体化桌面 WebUI（免额外启动独立 Web 控制台）**：
+   - 双击 `cuaflow-desktop.exe` 即在进程内静默启动后端并直接弹出**单一原生桌面 WebUI 窗口**（`pywebview` WebView2 / 无边框独立 App 窗口），关闭窗口自动退出，无需再额外管理控制器小窗或浏览器标签页。
+3. **录制脚本省 Token + 五层监督四级自愈 + 持续巡检熔断**：
+   - 高频流程沉淀为参数化 `Flow` 脚本，配合 `run_batch` 首条编译、后续零探索批量执行，大幅降低大模型 Token 消耗；
+   - **L0–L1–L1.5（零 Token 浏览器哨兵）–L2（自适应视觉裁判）–L3** 监督体系 + **Tier 0~3 四级自愈**（零 Token 清障重连 → `Repairer` 单步热修补 → `FallbackAgent` AI 自主接管 → 人工协同工单）+ `Schedules` 定时巡检熔断保护。
 
 ```mermaid
 flowchart TD
-  U["长周期自然语言任务 / 定时巡检"] --> RT{"智能路由"}
-  RT -- "命中已有 Flow" --> SUP["Supervisor 零探索回放"]
-  RT -- "多阶段 / 批量长任务" --> MP["MissionPlanner 动态规划 + 检查点"]
-  RT -- "单流程新任务" --> AU["Author 边做边编译 Flow v1"]
-  MP -- "探索收集列表" --> BR["常驻浏览器 (CDP + 标签页清理)"]
-  MP -- "run_batch: 第1项编译, 第2..N项零探索执行" --> SUP
-  SUP --> CHK{"L0 + L1 + L1.5 零Token哨兵 + 自适应L2"}
-  CHK -- "通过" --> SAVE_TOK["累计节省 Token · 继续下一步"]
-  CHK -- "异常" --> T0["Tier 0: 零Token清理弹窗/重连"]
-  T0 -- "仍失败" --> T1["Tier 1: Repairer 原地修补单步并存 vN+1"]
-  T1 -- "跨步异常(如登录过期)" --> T2["Tier 2: FallbackAgent AI自主接管恢复现场"]
-  T2 -- "恢复成功" --> SUP
+  U["用户自然语言对话 / 中途调整 / 放行确认"] <--> COORD["Coordinator 主控智能体 (一体化单窗口 WebUI)"]
+  COORD -- "真并行派发 (独立浏览器槽位池)" --> EXP["Explorer 浏览器直连子智能体 x N"]
+  COORD -- "本地 GUI / 命令行" --> DSK["Desktop 桌面直连子智能体"]
+  COORD -- "复用已有脚本 (0 探索 Token)" --> SUP["Supervisor 监督执行 + 四级自愈"]
+  COORD -- "按需沉淀可复用脚本" --> AU["Author 边做边录制 Flow"]
+  COORD -- "超长程分页批量" --> MP["MissionPlanner 检查点续跑 + run_batch"]
 ```
 
 ## 安装（Windows 10/11 / Linux）
 
 ### 方式一：Windows 安装包直接安装（推荐，免装 Python / Node.js）
 
-1. 前往 [GitHub Releases](https://github.com/yyy8080/cuaflow/releases) 下载 **`cuaflow-setup-0.1.0-win64.exe`**（或绿色免安装版 `cuaflow-portable-0.1.0-win64.zip`）。
+1. 前往 [GitHub Releases](https://github.com/yyy8080/cuaflow/releases) 下载 **`cuaflow-setup-0.2.0-win64.exe`**（或绿色免安装版 `cuaflow-portable-0.2.0-win64.zip`）。
 2. 双击运行安装向导（无需管理员权限，自动创建桌面快捷方式并可选加入 `PATH` 与开机自启持续巡检）。
-3. 双击桌面 **cuaflow** 图标，自动启动后台服务并打开 Web 控制台；进入 **「设置」** 页面直接粘贴模型 API Key 保存即可开箱使用（自动调用系统自带 Microsoft Edge / Chrome，无需额外下载浏览器内核；如需独立 Chromium 也可执行 `cuaflow install-browser`）。
+3. 双击桌面 **cuaflow** 图标，直接打开**一体化多智能体对话工作台窗口**；点击左侧 **「⚙️ 设置」** 直接粘贴模型 API Key 保存即可开始与主智能体对话（自动调用系统自带 Microsoft Edge / Chrome，无需额外下载浏览器内核）。
 
 ### 方式二：本地一键打包生成安装包
 
 ```powershell
-# Windows（生成 dist\cuaflow-setup-0.1.0-win64.exe 与便携版 .zip，需本机已装 Python 3.11+、Node.js 与 Inno Setup 6）
+# Windows（生成 dist\cuaflow-setup-0.2.0-win64.exe 与便携版 .zip，需本机已装 Python 3.11+、Node.js 与 Inno Setup 6）
 powershell -ExecutionPolicy Bypass -File .\packaging\build_windows.ps1
 # 如需把独立 Chromium 一并打进全离线包，加 -BundleChromium 参数：
 powershell -ExecutionPolicy Bypass -File .\packaging\build_windows.ps1 -BundleChromium

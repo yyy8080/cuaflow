@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cuaflow"
-version = "0.1.0"
-description = "cuaflow: browser + Windows desktop agent that records step-based reusable flows, supervised and self-repairing at runtime (fork of microsoft/CUAWright)"
+version = "0.2.0"
+description = "cuaflow: conversational multi-agent browser + Windows desktop studio with parallel subagents, supervised flows, and self-repair (fork of microsoft/CUAWright)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
@@ -32,6 +32,7 @@ win = [
     "uiautomation>=2.0.18; sys_platform == 'win32'",
     "pyautogui>=0.9.54; sys_platform == 'win32'",
     "pywin32>=306; sys_platform == 'win32'",
+    "pywebview>=5.0; sys_platform == 'win32'",
     "openpyxl>=3.1",
     "psutil>=5.9",
 ]

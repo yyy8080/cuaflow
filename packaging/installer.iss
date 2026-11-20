@@ -1,5 +1,5 @@
 #ifndef MyAppVersion
-  #define MyAppVersion "0.1.0"
+  #define MyAppVersion "0.2.0"
 #endif
 
 [Setup]
@@ -18,7 +18,7 @@ OutputDir=..\dist
 OutputBaseFilename=cuaflow-setup-{#MyAppVersion}-win64
 SetupIconFile=cuaflow.ico
 UninstallDisplayIcon={app}\cuaflow-desktop.exe
-UninstallDisplayName=cuaflow 智能浏览器与桌面代理
+UninstallDisplayName=cuaflow 多智能体对话工作台
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -34,10 +34,10 @@ Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.i
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Messages]
-WelcomeLabel1=欢迎安装 cuaflow 智能浏览器与桌面代理
-WelcomeLabel2=本程序将在您的电脑上安装 cuaflow {#MyAppVersion}（免安装 Python 环境，自动调用系统 Edge / Chrome 浏览器，支持长任务规划、脚本编译省 Token 与持续巡检自愈）。%n%n点击「下一步」继续安装。
+WelcomeLabel1=欢迎安装 cuaflow 多智能体对话工作台
+WelcomeLabel2=本程序将在您的电脑上安装 cuaflow {#MyAppVersion}（单窗口一体化 WebUI，支持主智能体对话派发、多子智能体并行操控浏览器与桌面、中途动态调整放行、脚本录制省 Token 与持续巡检自愈）。%n%n点击「下一步」继续安装。
 FinishedHeadingLabel=cuaflow 安装完成
-FinishedLabel=cuaflow 已成功安装到您的电脑，可通过桌面图标或开始菜单随时启动。
+FinishedLabel=cuaflow 已成功安装到您的电脑，可通过桌面图标或开始菜单直接启动一体化工作台。
 
 [Tasks]
 Name: "desktopicon"; Description: "创建桌面快捷方式 (&D)"; GroupDescription: "附加选项:"
@@ -48,7 +48,7 @@ Name: "autostart"; Description: "开机自动在后台启动 cuaflow 服务与�
 Source: "..\dist\cuaflow\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\cuaflow 控制台"; Filename: "{app}\cuaflow-desktop.exe"; WorkingDir: "{app}"; IconFilename: "{app}\cuaflow.ico"
+Name: "{group}\cuaflow 工作台"; Filename: "{app}\cuaflow-desktop.exe"; WorkingDir: "{app}"; IconFilename: "{app}\cuaflow.ico"
 Name: "{group}\cuaflow 命令行终端"; Filename: "{cmd}"; Parameters: "/k """"{app}\cuaflow.exe"" --help"""; WorkingDir: "{app}"; IconFilename: "{app}\cuaflow.ico"
 Name: "{group}\卸载 cuaflow"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\cuaflow"; Filename: "{app}\cuaflow-desktop.exe"; WorkingDir: "{app}"; IconFilename: "{app}\cuaflow.ico"; Tasks: desktopicon
@@ -57,7 +57,7 @@ Name: "{autodesktop}\cuaflow"; Filename: "{app}\cuaflow-desktop.exe"; WorkingDir
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "cuaflow"; ValueData: """{app}\cuaflow-desktop.exe"" --no-gui --no-browser"; Flags: uninsdeletevalue; Tasks: autostart
 
 [Run]
-Filename: "{app}\cuaflow-desktop.exe"; Description: "立即启动 cuaflow 桌面控制台"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\cuaflow-desktop.exe"; Description: "立即启动 cuaflow 多智能体工作台"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
 Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM cuaflow-desktop.exe /T"; Flags: runhidden; RunOnceId: "StopCuaflowDesktop"

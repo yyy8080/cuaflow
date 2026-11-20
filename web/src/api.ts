@@ -34,6 +34,76 @@ export type GlobalStats = {
   savings_ratio: number;
   schedules_active: number;
   schedules_tripped: number;
+  active_workers?: number;
+  chat_sessions?: number;
+};
+
+export type AgentKind = 'explorer' | 'desktop' | 'supervisor' | 'author' | 'planner';
+export type WorkerStatus = 'queued' | 'running' | 'waiting_approval' | 'succeeded' | 'failed' | 'aborted';
+
+export type SteeringEntry = {
+  ts: string;
+  source: string;
+  instruction: string;
+};
+
+export type Worker = {
+  id: string;
+  session_id?: string;
+  name: string;
+  agent_kind: AgentKind;
+  instruction: string;
+  start_url?: string;
+  params: Record<string, any>;
+  flow_id?: string;
+  run_id?: string;
+  status: WorkerStatus;
+  latest_note?: string;
+  latest_screenshot?: string;
+  output?: Record<string, any>;
+  error?: string;
+  steering_log?: SteeringEntry[];
+  usage?: UsageSnapshot;
+  started_at?: string;
+  finished_at?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ChatSession = {
+  id: string;
+  title: string;
+  status: 'idle' | 'thinking';
+  summary?: string;
+  usage?: UsageSnapshot;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ChatMessage = {
+  id: string;
+  session_id: string;
+  role: 'user' | 'assistant' | 'system';
+  sender: string;
+  content: string;
+  meta?: {
+    kind?: 'approval_request';
+    worker_id?: string;
+    worker_name?: string;
+    agent_kind?: AgentKind;
+    ticket_id?: string;
+    run_id?: string;
+    screenshot?: string;
+    reason?: string;
+    dispatched_workers?: Array<{ id: string; name: string; agent_kind: AgentKind }>;
+    actions?: Array<Record<string, any>>;
+  };
+  created_at: string;
+};
+
+export type ChatSessionDetail = ChatSession & {
+  messages: ChatMessage[];
+  workers: Worker[];
 };
 
 export type Flow = {
@@ -106,7 +176,7 @@ export type StepRecord = {
 
 export type Run = {
   id: string;
-  kind: 'flow' | 'author' | 'mission';
+  kind: 'flow' | 'author' | 'mission' | 'direct';
   flow_id?: string;
   version?: number;
   task_id?: string;
@@ -123,7 +193,7 @@ export type Run = {
   usage?: UsageSnapshot;
 };
 
-export type TaskMode = 'auto' | 'mission' | 'single';
+export type TaskMode = 'auto' | 'mission' | 'single' | 'direct';
 export type TaskStatus = 'queued' | 'matching' | 'planning' | 'authoring' | 'running' | 'succeeded' | 'failed' | 'aborted';
 
 export type PlanPhase = {
@@ -208,12 +278,35 @@ export type ModelSpec = {
   vision?: boolean;
   max_output_tokens?: number;
 };
-export type ModelRole = 'planner' | 'author' | 'supervisor' | 'repairer' | 'fallback' | 'vision_judge';
-export const MODEL_ROLES: ModelRole[] = ['planner', 'author', 'supervisor', 'repairer', 'fallback', 'vision_judge'];
+export type ModelRole =
+  | 'coordinator'
+  | 'operator'
+  | 'planner'
+  | 'author'
+  | 'supervisor'
+  | 'repairer'
+  | 'fallback'
+  | 'vision_judge';
+export const MODEL_ROLES: ModelRole[] = [
+  'coordinator',
+  'operator',
+  'planner',
+  'author',
+  'supervisor',
+  'repairer',
+  'fallback',
+  'vision_judge',
+];
 
 export type L2Policy = 'always' | 'on_change' | 'sample' | 'off';
 export type Settings = {
   models: { default: ModelSpec; roles: Partial<Record<ModelRole, ModelSpec>> };
+  coordinator?: {
+    max_parallel_workers?: number;
+    turn_limit?: number;
+    operator_turn_limit?: number;
+    auto_report?: boolean;
+  };
   supervisor: {
     l15_sentinel?: boolean;
     l2_policy: L2Policy;
@@ -240,6 +333,10 @@ export type Settings = {
 };
 
 export type EventType =
+  | 'chat_message'
+  | 'chat_status'
+  | 'worker_updated'
+  | 'worker_observation'
   | 'task_status'
   | 'plan_updated'
   | 'batch_progress'
@@ -359,6 +456,44 @@ export function wsUrl(): string {
 export const api = {
   health: () => request<{ ok: boolean; version: string; platform: string }>('GET', '/api/health'),
   stats: () => request<GlobalStats>('GET', '/api/stats'),
+
+  listChats: (limit = 80) => request<ChatSession[]>('GET', `/api/chats${qs({ limit })}`),
+  createChat: (title = '新对话') => request<ChatSession>('POST', '/api/chats', { title }),
+  getChat: (id: string) => request<ChatSessionDetail>('GET', `/api/chats/${enc(id)}`),
+  deleteChat: (id: string) => request<{ ok: boolean }>('DELETE', `/api/chats/${enc(id)}`),
+  sendChatMessage: (id: string, content: string, wait = false) =>
+    request<{ session: ChatSession; message: ChatMessage; reply?: ChatMessage }>(
+      'POST',
+      `/api/chats/${enc(id)}/messages`,
+      { content, wait },
+    ),
+
+  listWorkers: (opts: { session_id?: string; active_only?: boolean; limit?: number } = {}) =>
+    request<Worker[]>(
+      'GET',
+      `/api/workers${qs({
+        session_id: opts.session_id,
+        active_only: opts.active_only ? 1 : undefined,
+        limit: opts.limit,
+      })}`,
+    ),
+  dispatchWorkers: (body: {
+    session_id?: string;
+    tasks: Array<{
+      name: string;
+      agent_kind: AgentKind;
+      instruction: string;
+      start_url?: string;
+      flow_id?: string;
+      params?: Record<string, any>;
+    }>;
+  }) => request<Worker[]>('POST', '/api/workers/dispatch', body),
+  getWorker: (id: string) => request<Worker>('GET', `/api/workers/${enc(id)}`),
+  steerWorker: (id: string, instruction: string) =>
+    request<Worker>('POST', `/api/workers/${enc(id)}/steer`, { instruction }),
+  approveWorker: (id: string, body: { action: TicketAction; hint?: string }) =>
+    request<Worker>('POST', `/api/workers/${enc(id)}/approve`, body),
+  abortWorker: (id: string) => request<Worker>('POST', `/api/workers/${enc(id)}/abort`),
 
   listFlows: () => request<Flow[]>('GET', '/api/flows'),
   getFlow: (id: string) => request<FlowDetail>('GET', `/api/flows/${enc(id)}`),

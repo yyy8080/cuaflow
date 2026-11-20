@@ -107,6 +107,96 @@ function route(url: string): unknown {
       },
     ];
   }
+  if (p === '/api/chats') {
+    return [
+      {
+        id: 'chat1',
+        title: '双站点并行比价调研',
+        status: 'idle',
+        created_at: '2024-01-03T00:00:00Z',
+        updated_at: '2024-01-03T00:00:05Z',
+      },
+    ];
+  }
+  if (p === '/api/chats/chat1') {
+    return {
+      id: 'chat1',
+      title: '双站点并行比价调研',
+      status: 'idle',
+      created_at: '2024-01-03T00:00:00Z',
+      updated_at: '2024-01-03T00:00:05Z',
+      messages: [
+        {
+          id: 'm1',
+          session_id: 'chat1',
+          role: 'user',
+          sender: 'user',
+          content: '请同时派发两个浏览器探索子智能体查询价格',
+          created_at: '2024-01-03T00:00:01Z',
+        },
+        {
+          id: 'm2',
+          session_id: 'chat1',
+          role: 'assistant',
+          sender: 'coordinator',
+          content: '已为您并行启动两个直连浏览器子智能体。',
+          meta: {
+            dispatched_workers: [
+              { id: 'w1', name: '京东行情抓取', agent_kind: 'explorer' },
+              { id: 'w2', name: '提交确认前等待', agent_kind: 'explorer' },
+            ],
+          },
+          created_at: '2024-01-03T00:00:02Z',
+        },
+      ],
+      workers: [
+        {
+          id: 'w1',
+          session_id: 'chat1',
+          name: '京东行情抓取',
+          agent_kind: 'explorer',
+          instruction: '查询笔记本报价',
+          params: {},
+          run_id: 'run42',
+          status: 'running',
+          latest_note: '正在读取列表首屏报价',
+          latest_screenshot: 'shots/open.png',
+          created_at: '2024-01-03T00:00:02Z',
+          updated_at: '2024-01-03T00:00:04Z',
+        },
+        {
+          id: 'w2',
+          session_id: 'chat1',
+          name: '提交确认前等待',
+          agent_kind: 'explorer',
+          instruction: '准备提交预约单',
+          params: {},
+          run_id: 'run42',
+          status: 'waiting_approval',
+          latest_note: '⏸ 等待放行：准备点击确认提交按钮',
+          created_at: '2024-01-03T00:00:02Z',
+          updated_at: '2024-01-03T00:00:05Z',
+        },
+      ],
+    };
+  }
+  if (p === '/api/workers') {
+    return [
+      {
+        id: 'w1',
+        session_id: 'chat1',
+        name: '京东行情抓取',
+        agent_kind: 'explorer',
+        instruction: '查询笔记本报价',
+        params: {},
+        run_id: 'run42',
+        status: 'running',
+        latest_note: '正在读取列表首屏报价',
+        created_at: '2024-01-03T00:00:02Z',
+        updated_at: '2024-01-03T00:00:04Z',
+      },
+    ];
+  }
   if (p === '/api/tickets') return u.searchParams.get('status') === 'open' ? [ticket] : [];
   if (p === '/api/settings') return settings;
   return null;
@@ -166,12 +256,21 @@ async function render(path: string) {
 }
 
 describe('pages render with mocked API', () => {
-  it('tasks page', async () => {
+  it('chat studio home page renders coordinator chat and parallel subagent fleet', async () => {
     const t = await render('/');
+    expect(t).toContain('双站点并行比价调研');
+    expect(t).toContain('京东行情抓取');
+    expect(t).toContain('立即放行');
+    expect(t).toContain('21.6k');
+    const shot = container.querySelector('.worker-shot') as HTMLImageElement;
+    expect(shot.getAttribute('src')).toBe('/api/runs/run42/artifacts/shots/open.png?token=tok');
+  });
+
+  it('tasks page', async () => {
+    const t = await render('/tasks');
     expect(t).toContain('导出十月报表');
     expect(t).toContain('直接复用');
     expect(t).toContain('21.6k');
-    expect(container.querySelector('.nav-count')?.textContent).toBe('1');
   });
 
   it('schedules page', async () => {

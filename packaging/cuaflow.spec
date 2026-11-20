@@ -79,6 +79,15 @@ if sys.platform == "win32":
             hiddenimports += collect_submodules(win_pkg)
         except Exception:
             hiddenimports.append(win_pkg)
+    # 打包单窗口原生 WebView2 外壳（pywebview 及其底层 pythonnet/clr_loader 动态库）
+    for wv_pkg in ("webview", "pythonnet", "clr_loader", "proxy_tools", "bottle"):
+        try:
+            wv_datas, wv_bins, wv_hidden = collect_all(wv_pkg)
+            datas += wv_datas
+            binaries += wv_bins
+            hiddenimports += wv_hidden
+        except Exception:
+            pass
 
 excludes = ["pytest", "_pytest", "IPython", "matplotlib", "scipy", "numpy.testing"]
 
