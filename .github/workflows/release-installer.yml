@@ -1,0 +1,153 @@
+name: build-installer
+on:
+  push:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Optional GitHub Release tag to publish/update (e.g. v0.1.0)"
+        required: false
+        default: ""
+      bundle_chromium:
+        description: "Bundle standalone Chromium inside installer (larger offline package)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  windows-installer:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.ref, 'refs/tags/v') ||
+      github.ref == 'refs/heads/main' ||
+      github.ref == 'refs/heads/cuaflow-main'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build Windows Setup .exe and Portable .zip
+        shell: pwsh
+        run: |
+          $buildArgs = @()
+          if ("${{ inputs.bundle_chromium }}" -eq "true") {
+            $buildArgs += "-BundleChromium"
+          }
+          & .\packaging\build_windows.ps1 @buildArgs
+          Get-ChildItem .\dist
+
+      - name: Silent-install and end-to-end smoke test on Windows
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $Setup = Get-ChildItem .\dist\cuaflow-setup-*-win64.exe | Select-Object -First 1
+          if (-not $Setup) { throw "Setup .exe was not generated!" }
+          Write-Host "==> Silently installing $($Setup.FullName) to C:\cuaflow-installed..."
+          $proc = Start-Process -FilePath $Setup.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/TASKS=""','/DIR="C:\cuaflow-installed"' -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "Silent installer failed with exit code $($proc.ExitCode)" }
+
+          foreach ($bin in @("cuaflow-desktop.exe", "cuaflow.exe", "cuaflow-tool.exe", "cuaflow.ico")) {
+            if (-not (Test-Path "C:\cuaflow-installed\$bin")) {
+              throw "Expected installed file missing: C:\cuaflow-installed\$bin"
+            }
+          }
+
+          # 1. 验证独立 CLI 可在代码仓库目录之外正常运行
+          Push-Location "C:\Windows\Temp"
+          try {
+            & "C:\cuaflow-installed\cuaflow.exe" --help | Out-Null
+            & "C:\cuaflow-installed\cuaflow-tool.exe" --help | Out-Null
+          } finally {
+            Pop-Location
+          }
+
+          # 2. 验证打包后的 --runner-proc 可执行真实 Flow 步骤，并在未安装 Playwright Chromium 时自动发现系统 Edge
+          New-Item -ItemType Directory -Force -Path "C:\cuaflow-smoke" | Out-Null
+          $smokeLines = @(
+            'from cuaflow.flow import Ctx, Flow, expect',
+            'flow = Flow("安装包独立运行校验", output={"browser": "str"})',
+            '@flow.step("检测系统浏览器与独立运行时", expect="成功发现可用浏览器")',
+            'def verify_runtime(c: Ctx):',
+            '    from cuaflow.platform.browser.session import resolve_browser_executable',
+            '    exe, ch = resolve_browser_executable()',
+            '    c.output["browser"] = f"{ch}:{exe}"',
+            '    expect.that(len(exe) > 0, "browser found")'
+          )
+          [System.IO.File]::WriteAllLines("C:\cuaflow-smoke\smoke.py", $smokeLines)
+
+          $runOut = (& "C:\cuaflow-installed\cuaflow.exe" run-file "C:\cuaflow-smoke\smoke.py" --run-dir "C:\cuaflow-smoke\run") -join "`n"
+          Write-Host "Standalone flow output: $runOut"
+          if ($LASTEXITCODE -ne 0 -or ($runOut -notmatch "msedge|chrome|chromium")) {
+            throw "Standalone flow execution failed: $runOut"
+          }
+
+          # 3. 验证无窗口模式下的 cuaflow-desktop.exe 可正常提供 REST API 与内置 Web 控制台单页应用
+          $env:CUAFLOW_DATA_DIR = "C:\cuaflow-smoke\data"
+          $srv = Start-Process -FilePath "C:\cuaflow-installed\cuaflow-desktop.exe" -ArgumentList '--no-gui','--no-browser','--port','18765','--token','smoketoken' -PassThru
+          try {
+            $healthy = $false
+            for ($i = 0; $i -lt 40; $i++) {
+              Start-Sleep -Milliseconds 500
+              try {
+                $h = Invoke-RestMethod -Uri "http://127.0.0.1:18765/api/health" -TimeoutSec 2
+                if ($h.ok -eq $true) { $healthy = $true; break }
+              } catch {}
+            }
+            if (-not $healthy) { throw "Installed cuaflow-desktop.exe did not pass /api/health" }
+            $spa = (Invoke-WebRequest -Uri "http://127.0.0.1:18765/" -UseBasicParsing -TimeoutSec 5).Content
+            if ($spa -notmatch 'id="root"') { throw "Bundled Web Console HTML missing root mount" }
+            Write-Host "==> Installed cuaflow-desktop.exe passed all checks!"
+          } finally {
+            Stop-Process -Id $srv.Id -Force -ErrorAction SilentlyContinue
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cuaflow-windows-installer
+          path: |
+            dist/cuaflow-setup-*-win64.exe
+            dist/cuaflow-portable-*-win64.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+
+      - name: Publish to GitHub Releases
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $Tag = "${{ inputs.release_tag }}"
+          if (-not $Tag) {
+            $Tag = "${{ github.ref_name }}"
+          }
+          $NoteLines = @(
+            "## cuaflow $Tag — 多智能体对话式工作台 Windows 独立桌面安装包",
+            "",
+            "### 核心亮点",
+            "- **对话式主控智能体 + 多子智能体真并行**：自然语言与主智能体对话，按需并发调度浏览器直连（独立槽位互不冲突）、桌面直连、脚本监督、脚本录制与长程规划子智能体。",
+            "- **运行中途动态调整与一键放行**：子智能体后台并发执行期间对话不阻塞，支持随时注入中途调整指令（Steering）或对关键步骤一键放行。",
+            "- **单窗口一体化桌面 WebUI**：双击直接打开独立桌面应用窗口，无需额外启动独立控制器或浏览器标签页。",
+            "",
+            "### 下载说明",
+            "- **cuaflow-setup-*-win64.exe（推荐）**：Windows 10/11 标准向导安装包，免装 Python 与 Node.js，自动识别调用系统 Microsoft Edge / Chrome，安装后在「设置」页粘贴 API Key 即可开箱使用。",
+            "- **cuaflow-portable-*-win64.zip**：绿色免安装便携版，解压后双击 cuaflow-desktop.exe 即可启动。",
+            "- **SHA256SUMS.txt**：安装包 SHA-256 校验值。"
+          )
+          $NotesFile = "$env:RUNNER_TEMP\release_notes.md"
+          [System.IO.File]::WriteAllLines($NotesFile, $NoteLines)
+          $Assets = (Get-Item .\dist\cuaflow-setup-*-win64.exe, .\dist\cuaflow-portable-*-win64.zip, .\dist\SHA256SUMS.txt).FullName
+          gh release view $Tag > $null 2>&1
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $Tag @Assets --target "${{ github.sha }}" --title "cuaflow $Tag" --notes-file $NotesFile
+          } else {
+            gh release upload $Tag @Assets --clobber
+          }

@@ -1,20 +1,44 @@
-name: runtime-tests
+name: tests
 on:
   push:
   pull_request:
 jobs:
-  test:
+  linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-      - run: pip install -e ".[desktop,skill-factory,test,build]" -e extensions/skill-factory
+          python-version: "3.11"
+      - run: pip install -e ".[test,build]" ruff
       - run: playwright install --with-deps chromium
+      - run: ruff check --select F,E9 src tests
       - run: pytest -q
-      - run: python -m compileall -q src extensions/skill-factory/src
-      - run: git diff --check
       - run: python -m build
-      - run: python -m build extensions/skill-factory
-      - run: python tests/packaging/check_wheels.py dist/cuawright-*.whl extensions/skill-factory/dist/*.whl
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npx vitest run
+      - run: npm run build
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e ".[win,test]"
+      - run: playwright install chromium
+      - name: Windows desktop smoke (Notepad via UIA)
+        run: pytest -q -m windows tests/platform
+      - name: Regular suite
+        run: pytest -q

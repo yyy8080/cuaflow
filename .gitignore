@@ -15,3 +15,9 @@ release/osworld/.scratch/
 release/osworld/dist/
 
 .wheel-env/
+web/node_modules/
+web/dist/
+cuaflow_run/
+.cuaflow/
+.pytest_cache/
+.ruff_cache/
