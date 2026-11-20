@@ -600,9 +600,19 @@ def test_stateful_spa_pagination_loop_and_live_browser_observe(tmp_path: Path, s
         def planner_fn(messages, tools):
             turn["n"] += 1
             if turn["n"] == 1:
-                return {"tool": "python", "args": {"code": f"c.browser.page().goto('{spa_url}')"}}
+                return {
+                    "tool": "python",
+                    "args": {
+                        "code": (
+                            "p = c.browser.page()\n"
+                            f"p.goto('{spa_url}')\n"
+                            "c.browser.wait_stable(p, timeout=5, idle_ms=100)\n"
+                            "print(p.url)"
+                        )
+                    },
+                }
             if turn["n"] == 2:
-                assert "Error" not in str(messages[-2].get("content", "")), messages[-2]
+                assert "ERROR:" not in str(messages[-1].get("content", "")), messages[-1]
                 return {
                     "tool": "run_batch",
                     "args": {
@@ -633,6 +643,7 @@ def test_stateful_spa_pagination_loop_and_live_browser_observe(tmp_path: Path, s
         task = svc.orchestrator.submit_task("遍历 SPA 全部页", mode="mission", enqueue=False)
         task = svc.orchestrator.process_task(task["id"], unattended=True)
         assert task["status"] == "succeeded", task
+        assert "pages_out" in task["checkpoint"]["mission_state"], task["checkpoint"]
         items = [x["item"] for x in task["checkpoint"]["mission_state"]["pages_out"]]
         # Stopped automatically after 4 pages (out of max_iterations=10) when has_next became False!
         assert items == ["ITEM-1", "ITEM-2", "ITEM-3", "ITEM-4"]

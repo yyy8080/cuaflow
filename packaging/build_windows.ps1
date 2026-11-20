@@ -40,6 +40,7 @@ if ($BundleChromium) {
 Write-Host "==> [3/5] Freezing standalone executables with PyInstaller..." -ForegroundColor Cyan
 if (Test-Path "$Root\dist\cuaflow") { Remove-Item -Recurse -Force "$Root\dist\cuaflow" }
 pyinstaller "$PSScriptRoot\cuaflow.spec" --noconfirm --clean
+Copy-Item -Force "$PSScriptRoot\cuaflow.ico" "$Root\dist\cuaflow\cuaflow.ico"
 
 Write-Host "==> [4/5] Creating portable archive..." -ForegroundColor Cyan
 $ZipPath = "$Root\dist\cuaflow-portable-$Version-win64.zip"

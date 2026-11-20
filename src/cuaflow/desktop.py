@@ -90,8 +90,14 @@ def _run_tk_window(console_url: str, display_addr: str, data_root: Path, browser
     win.resizable(False, False)
     win.configure(bg="#0f172a")
 
+    meipass = getattr(sys, "_MEIPASS", "")
     ico_candidates = [
         Path(sys.executable).resolve().parent / "cuaflow.ico",
+        *(
+            [Path(meipass) / "cuaflow.ico"]
+            if meipass
+            else []
+        ),
         Path(__file__).resolve().parents[2] / "packaging" / "cuaflow.ico",
     ]
     for ico in ico_candidates:

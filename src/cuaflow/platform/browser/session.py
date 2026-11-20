@@ -528,10 +528,8 @@ class PersistentBrowser:
         # Wait for Chromium's default persistent context and open page targets BEFORE calling context()
         # so we never accidentally create a transient incognito context via browser.new_context().
         port = int((self.session or {}).get("port") or 0)
-        expected_pages = len(cdp_page_targets(port, timeout=0.5)) if port else 0
-        if self.launched:
-            expected_pages = max(1, expected_pages)
-        sync_deadline = time.monotonic() + (5.0 if self.launched else 2.0)
+        expected_pages = max(1, len(cdp_page_targets(port, timeout=2.0)) if port else 1)
+        sync_deadline = time.monotonic() + (5.0 if self.launched else 3.0)
         while time.monotonic() < sync_deadline:
             ctxs = self._browser.contexts
             if ctxs and len(ctxs[0].pages) >= expected_pages:

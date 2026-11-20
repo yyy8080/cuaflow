@@ -16,6 +16,7 @@ fi
 "$PYTHON_BIN" -m pip install -e . pyinstaller
 "$PYTHON_BIN" "$SCRIPT_DIR/generate_icon.py"
 "$PYTHON_BIN" -m PyInstaller "$SCRIPT_DIR/cuaflow.spec" --noconfirm --clean
+cp -f "$SCRIPT_DIR/cuaflow.ico" "$ROOT_DIR/dist/cuaflow/cuaflow.ico"
 
 TAR_OUT="$ROOT_DIR/dist/cuaflow-portable-${VERSION}-linux-x64.tar.gz"
 tar -C "$ROOT_DIR/dist" -czf "$TAR_OUT" cuaflow
